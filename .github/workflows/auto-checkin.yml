@@ -1,0 +1,32 @@
+name: 1min.ai 自動簽到
+
+on:
+  schedule:
+    # 每天早上 8:00 (UTC) 執行，相當於台灣時間 16:00
+    - cron: '0 8 * * *'
+  workflow_dispatch: # 允許手動觸發
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    name: 執行 1min.ai 自動簽到
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: 1min.ai 自動簽到
+      uses: ./
+      with:
+        email: ${{ secrets.ONEMIN_EMAIL }}
+        password: ${{ secrets.ONEMIN_PASSWORD }}
+        totp_secret: ${{ secrets.ONEMIN_TOTP_SECRET }}
+      
+    - name: 簽到結果通知
+      if: always()
+      run: |
+        if [ "${{ steps.checkin.outputs.success }}" == "true" ]; then
+          echo "✅ 簽到成功: ${{ steps.checkin.outputs.message }}"
+        else
+          echo "❌ 簽到失敗: ${{ steps.checkin.outputs.message }}"
+        fi

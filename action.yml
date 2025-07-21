@@ -1,0 +1,22 @@
+name: '1min.ai Auto Checkin'
+description: '1min.ai 自動簽到 GitHub Action'
+author: 'Your Name'
+
+inputs:
+  email:
+    description: '1min.ai 帳號 email'
+    required: true
+  password:
+    description: '1min.ai 帳號密碼'
+    required: true
+  totp_secret:
+    description: 'TOTP 金鑰 (如果有啟用 2FA)'
+    required: false
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+
+branding:
+  icon: 'check-circle'
+  color: 'green'
