@@ -1,7 +1,7 @@
 {
   "name": "1min-ai-auto-checkin",
   "version": "1.0.0",
-  "description": "1min.ai 自動簽到 GitHub Action",
+  "description": "1min.ai Auto Checkin GitHub Action",
   "main": "dist/index.js",
   "scripts": {
     "build": "ncc build src/index.js -o dist --source-map --license licenses.txt",

@@ -1,16 +1,16 @@
 name: '1min.ai Auto Checkin'
-description: '1min.ai 自動簽到 GitHub Action'
+description: '1min.ai Auto Checkin GitHub Action'
 author: 'Your Name'
 
 inputs:
   email:
-    description: '1min.ai 帳號 email'
+    description: '1min.ai account email'
     required: true
   password:
-    description: '1min.ai 帳號密碼'
+    description: '1min.ai account password'
     required: true
   totp_secret:
-    description: 'TOTP 金鑰 (如果有啟用 2FA)'
+    description: 'TOTP secret key (if 2FA is enabled)'
     required: false
 
 runs:

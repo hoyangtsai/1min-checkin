@@ -1,122 +1,123 @@
-# 1min.ai 自動簽到 GitHub Action
+# 1min.ai Auto Checkin GitHub Action
 
-這是一個用於 1min.ai 自動簽到的 GitHub Action，支援帳號密碼登入和 TOTP 雙因子驗證。
+This is a GitHub Action for automatic daily check-in to 1min.ai, supporting email/password login and TOTP two-factor authentication.
 
-## 功能特色
+## Features
 
-- 🤖 自動每日簽到
-- 🔐 支援 TOTP 雙因子驗證
-- 📊 顯示帳戶餘額資訊
-- ⏰ 可自訂執行時間
-- 📝 自動保存執行日誌
+- 🤖 Automatic daily check-in
+- 🔐 TOTP two-factor authentication support
+- 📊 Display account balance information
+- ⏰ Customizable execution time
+- 📝 Automatic execution log saving
 
-## 快速開始
+## Quick Start
 
-### 1. 使用此模板創建新專案
+### 1. Create a New Project Using This Template
 
-點擊 "Use this template" 按鈕創建你自己的專案，或者 Fork 此專案到你的 GitHub 帳號。
+Click the "Use this template" button to create your own project, or fork this project to your GitHub account.
 
-### 2. 設定 GitHub Secrets
+### 2. Configure GitHub Secrets
 
-在你的 GitHub 專案中，前往 `Settings` > `Secrets and variables` > `Actions`，新增以下 secrets：
+In your GitHub project, go to `Settings` > `Secrets and variables` > `Actions`, and add the following secrets:
 
-**必要設定：**
-- `EMAIL`: 你的 1min.ai 帳號
-- `PASSWORD`: 你的 1min.ai 密碼
+**Required Settings:**
+- `EMAIL`: Your 1min.ai account email
+- `PASSWORD`: Your 1min.ai account password
 
-**可選設定：**
-- `TOTP_SECRET`: 你的 TOTP 金鑰（如果有啟用雙因子驗證才需要）
+**Optional Settings:**
+- `TOTP_SECRET`: Your TOTP secret key (only needed if two-factor authentication is enabled)
 
-### 3. 啟用 GitHub Actions
+### 3. Enable GitHub Actions
 
-確保你的專案已啟用 GitHub Actions，第一次執行會自動開始。
+Make sure GitHub Actions is enabled for your project. The first execution will start automatically.
 
-## 自訂設定
+## Custom Configuration
 
-### 修改執行時間
+### Modify Execution Time
 
-編輯 `.github/workflows/daily-checkin.yml` 檔案中的 cron 表達式：
+Edit the cron expression in the `.github/workflows/daily-checkin.yml` file:
 
 ```yaml
 schedule:
-  - cron: '0 8 * * *'  # 每天 UTC 8:00 (台北時間 16:00)
+  - cron: '0 8 * * *'  # Daily at UTC 8:00 (Taipei time 16:00)
 ```
 
-常用時間設定：
-- `0 0 * * *` - 每天 UTC 0:00 (台北時間 8:00)
-- `0 8 * * *` - 每天 UTC 8:00 (台北時間 16:00)
-- `0 12 * * *` - 每天 UTC 12:00 (台北時間 20:00)
+Common time settings:
+- `0 0 * * *` - Daily at UTC 0:00 (Taipei time 8:00)
+- `0 8 * * *` - Daily at UTC 8:00 (Taipei time 16:00)
+- `0 12 * * *` - Daily at UTC 12:00 (Taipei time 20:00)
 
-### 手動執行
+### Manual Execution
 
-你也可以在 GitHub Actions 頁面手動觸發執行：
-1. 前往你的專案 > Actions 頁面
-2. 選擇 "1min.ai 每日自動簽到" workflow
-3. 點擊 "Run workflow" 按鈕
+You can also manually trigger execution on the GitHub Actions page:
+1. Go to your project > Actions page
+2. Select the "1min.ai Daily Auto Checkin" workflow
+3. Click the "Run workflow" button
 
-## 本地測試
+## Local Testing
 
-如果你想在本地測試腳本：
+If you want to test the script locally:
 
 ```bash
-# 安裝相依套件
+# Install dependencies
 npm install
 
-# 設定環境變數
+# Set environment variables
 export EMAIL="your-email@example.com"
 export PASSWORD="your-password"
-export TOTP_SECRET="your-totp-secret"  # 可選
+export TOTP_SECRET="your-totp-secret"  # Optional
 
-# 執行測試
+# Run test
 npm start
 ```
 
-## 專案結構
+## Project Structure
 
 ```
 ├── .github/workflows/
-│   └── daily-checkin.yml    # GitHub Action 工作流程
+│   └── daily-checkin.yml    # GitHub Action workflow
 ├── src/
-│   └── index.js             # 主要簽到邏輯
-├── package.json             # 專案設定檔
-└── README.md               # 說明文件
+│   └── index.js             # Main check-in logic
+├── package.json             # Project configuration file
+├── LICENSE                  # MIT License
+└── README.md               # Documentation
 ```
 
-## 注意事項
+## Important Notes
 
-- 請確保你的 GitHub 帳號有足夠的 Actions 使用額度
-- 建議定期檢查執行結果
-- 如果連續失敗，請檢查帳號密碼是否正確
-- TOTP 金鑰只有在啟用雙因子驗證時才需要設定
+- Ensure your GitHub account has sufficient Actions usage quota
+- Regularly check execution results
+- If consecutive failures occur, check if account credentials are correct
+- TOTP secret key is only needed when two-factor authentication is enabled
 
-## 安全性
+## Security
 
-- 所有敏感資訊都儲存在 GitHub Secrets 中
-- 不會在日誌中顯示完整的帳號密碼資訊
-- 使用官方 GitHub Actions 確保安全性
+- All sensitive information is stored in GitHub Secrets
+- Complete account/password information is not displayed in logs
+- Uses official GitHub Actions to ensure security
 
-## 故障排除
+## Troubleshooting
 
-### 常見問題
+### Common Issues
 
-1. **登入失敗 401 錯誤**
-   - 檢查 EMAIL 和 PASSWORD 是否正確
-   - 確認帳號沒有被鎖定
+1. **Login Failed 401 Error**
+   - Check if EMAIL and PASSWORD are correct
+   - Confirm the account is not locked
 
-2. **TOTP 驗證失敗**
-   - 檢查 TOTP_SECRET 是否正確
-   - 確認時間同步正確
+2. **TOTP Verification Failed**
+   - Check if TOTP_SECRET is correct
+   - Ensure time synchronization is correct
 
-3. **GitHub Action 沒有執行**
-   - 檢查 cron 表達式是否正確
-   - 確認 GitHub Actions 已啟用
+3. **GitHub Action Not Executing**
+   - Check if the cron expression is correct
+   - Confirm GitHub Actions is enabled
 
-### 查看執行日誌
+### View Execution Logs
 
-1. 前往你的專案 > Actions 頁面
-2. 點擊最近的執行記錄
-3. 查看詳細的執行日誌
+1. Go to your project > Actions page
+2. Click on the recent execution record
+3. View detailed execution logs
 
-## 授權
+## License
 
-MIT License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

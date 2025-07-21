@@ -4,20 +4,20 @@ const fetch = require('node-fetch');
 
 class OneMinAutoCheckin {
     constructor() {
-        // 優先使用 GitHub Action inputs，其次使用環境變數
+        // Prioritize GitHub Action inputs, then environment variables
         this.email = core.getInput('email') || process.env.EMAIL;
         this.password = core.getInput('password') || process.env.PASSWORD;
         this.totpSecret = core.getInput('totp_secret') || process.env.TOTP_SECRET;
         this.deviceId = this.generateDeviceId();
         
         if (!this.email || !this.password) {
-            const error = '缺少必要的參數: email 和 password';
+            const error = 'Missing required parameters: email and password';
             core.setFailed(error);
             throw new Error(error);
         }
         
-        console.log(`📧 帳號: ${this.email.substring(0, 3)}***${this.email.substring(this.email.indexOf('@'))}`);
-        console.log(`🔐 TOTP: ${this.totpSecret ? '已設定' : '未設定'}`);
+        console.log(`📧 Account: ${this.email.substring(0, 3)}***${this.email.substring(this.email.indexOf('@'))}`);
+        console.log(`🔐 TOTP: ${this.totpSecret ? 'Configured' : 'Not configured'}`);
     }
 
     generateDeviceId() {
@@ -31,7 +31,7 @@ class OneMinAutoCheckin {
     }
 
     async login() {
-        console.log('🚀 開始登入請求...');
+        console.log('🚀 Starting login request...');
         
         const loginUrl = 'https://api.1min.ai/auth/login';
         const headers = {
@@ -58,40 +58,40 @@ class OneMinAutoCheckin {
             });
 
             const data = await response.json();
-            console.log(`📊 登入回應狀態: ${response.status}`);
+            console.log(`📊 Login response status: ${response.status}`);
 
             if (response.status === 200 && data.user) {
                 if (data.user.mfaRequired) {
-                    console.log('🔐 需要 TOTP 驗證');
+                    console.log('🔐 TOTP verification required');
                     if (this.totpSecret) {
                         return await this.performMFAVerification(data.user.token);
                     } else {
-                        throw new Error('需要 TOTP 但未提供金鑰');
+                        throw new Error('TOTP required but secret key not provided');
                     }
                 } else {
-                    console.log('✅ 登入成功（無需 TOTP）');
+                    console.log('✅ Login successful (no TOTP required)');
                     await this.displayCreditInfo(data);
                     return data;
                 }
             } else {
-                let errorMsg = '登入失敗';
+                let errorMsg = 'Login failed';
                 if (data.message) {
                     errorMsg = data.message;
                 } else if (response.status === 401) {
-                    errorMsg = '帳號或密碼錯誤';
+                    errorMsg = 'Invalid email or password';
                 } else if (response.status === 429) {
-                    errorMsg = '請求過於頻繁，請稍後再試';
+                    errorMsg = 'Too many requests, please try again later';
                 }
                 throw new Error(errorMsg);
             }
         } catch (error) {
-            console.error('❌ 登入失敗:', error.message);
+            console.error('❌ Login failed:', error.message);
             throw error;
         }
     }
 
     async performMFAVerification(tempToken) {
-        console.log('🔐 開始 TOTP 驗證流程...');
+        console.log('🔐 Starting TOTP verification process...');
 
         const totp = new OTPAuth.TOTP({
             secret: this.totpSecret,
@@ -101,7 +101,7 @@ class OneMinAutoCheckin {
         });
 
         const totpCode = totp.generate();
-        console.log('🎯 產生 TOTP 驗證碼');
+        console.log('🎯 Generated TOTP verification code');
 
         const mfaUrl = 'https://api.1min.ai/auth/mfa/verify';
         const headers = {
@@ -128,10 +128,10 @@ class OneMinAutoCheckin {
             });
 
             const data = await response.json();
-            console.log(`📊 TOTP 驗證回應狀態: ${response.status}`);
+            console.log(`📊 TOTP verification response status: ${response.status}`);
 
             if (response.status === 200) {
-                console.log('✅ TOTP 驗證成功！');
+                console.log('✅ TOTP verification successful!');
                 await this.displayCreditInfo(data);
                 return data;
             } else {
@@ -139,7 +139,7 @@ class OneMinAutoCheckin {
                 throw new Error(errorMsg);
             }
         } catch (error) {
-            console.error('❌ TOTP 驗證失敗:', error.message);
+            console.error('❌ TOTP verification failed:', error.message);
             throw error;
         }
     }
@@ -154,7 +154,7 @@ class OneMinAutoCheckin {
 
                 const userName = (user.teams && user.teams[0] && user.teams[0].userName) ?
                     user.teams[0].userName :
-                    (user.email ? user.email.split('@')[0] : '用戶');
+                    (user.email ? user.email.split('@')[0] : 'User');
 
                 if (teamId && authToken) {
                     const usedCredit = teamInfo.usedCredit || 0;
@@ -165,24 +165,24 @@ class OneMinAutoCheckin {
                     const totalCredit = remainingCredit + usedCredit;
                     const availablePercent = totalCredit > 0 ? ((remainingCredit / totalCredit) * 100).toFixed(1) : 0;
 
-                    console.log('💰 Credit 資訊:');
-                    console.log(`   可用額度: ${remainingCredit.toLocaleString('zh-TW')}`);
-                    console.log(`   已使用: ${usedCredit.toLocaleString('zh-TW')}`);
-                    console.log(`   可用比例: ${availablePercent}%`);
-                    console.log(`✅ ${userName} 登入成功 | 餘額: ${remainingCredit.toLocaleString('zh-TW')} (${availablePercent}%)`);
+                    console.log('💰 Credit Information:');
+                    console.log(`   Available: ${remainingCredit.toLocaleString()}`);
+                    console.log(`   Used: ${usedCredit.toLocaleString()}`);
+                    console.log(`   Available percentage: ${availablePercent}%`);
+                    console.log(`✅ ${userName} login successful | Balance: ${remainingCredit.toLocaleString()} (${availablePercent}%)`);
                 }
             } else {
-                console.log('⚠️ 無法取得 Credit 資訊');
-                console.log('✅ 登入成功！');
+                console.log('⚠️ Unable to retrieve credit information');
+                console.log('✅ Login successful!');
             }
         } catch (error) {
-            console.error('❌ 顯示 Credit 資訊時發生錯誤:', error.message);
-            console.log('✅ 登入成功！');
+            console.error('❌ Error displaying credit information:', error.message);
+            console.log('✅ Login successful!');
         }
     }
 
     async fetchLatestCredit(teamId, authToken, userName, usedCredit) {
-        console.log(`🔄 獲取最新 Credit 資訊 (Team ID: ${teamId})`);
+        console.log(`🔄 Fetching latest credit information (Team ID: ${teamId})`);
 
         const creditUrl = `https://api.1min.ai/teams/${teamId}/credits`;
         const headers = {
@@ -198,7 +198,7 @@ class OneMinAutoCheckin {
 
         try {
             const response = await fetch(creditUrl, { headers });
-            console.log(`📊 Credit API 回應狀態: ${response.status}`);
+            console.log(`📊 Credit API response status: ${response.status}`);
 
             if (response.status === 200) {
                 const creditData = await response.json();
@@ -206,34 +206,34 @@ class OneMinAutoCheckin {
                 const totalCredit = latestCredit + usedCredit;
                 const availablePercent = totalCredit > 0 ? ((latestCredit / totalCredit) * 100).toFixed(1) : 0;
 
-                console.log('💰 最新 Credit 資訊:');
-                console.log(`   可用額度: ${latestCredit.toLocaleString('zh-TW')}`);
-                console.log(`   已使用: ${usedCredit.toLocaleString('zh-TW')}`);
-                console.log(`   可用比例: ${availablePercent}%`);
-                console.log(`✅ ${userName} 登入成功 | 餘額: ${latestCredit.toLocaleString('zh-TW')} (${availablePercent}%)`);
+                console.log('💰 Latest Credit Information:');
+                console.log(`   Available: ${latestCredit.toLocaleString()}`);
+                console.log(`   Used: ${usedCredit.toLocaleString()}`);
+                console.log(`   Available percentage: ${availablePercent}%`);
+                console.log(`✅ ${userName} login successful | Balance: ${latestCredit.toLocaleString()} (${availablePercent}%)`);
             } else {
-                console.log(`❌ 獲取 Credit 失敗 - 狀態: ${response.status}`);
-                console.log(`✅ ${userName} 登入成功`);
+                console.log(`❌ Failed to fetch credit - Status: ${response.status}`);
+                console.log(`✅ ${userName} login successful`);
             }
         } catch (error) {
-            console.error('❌ 獲取 Credit 資訊失敗:', error.message);
-            console.log(`✅ ${userName} 登入成功`);
+            console.error('❌ Failed to fetch credit information:', error.message);
+            console.log(`✅ ${userName} login successful`);
         }
     }
 
     async run() {
         try {
-            console.log('🎬 1min.ai 自動簽到開始');
-            console.log(`⏰ 執行時間: ${new Date().toLocaleString('zh-TW')}`);
+            console.log('🎬 1min.ai auto checkin started');
+            console.log(`⏰ Execution time: ${new Date().toLocaleString()}`);
             
             await this.login();
             
-            console.log('🎉 簽到流程完成');
+            console.log('🎉 Checkin process completed');
             core.setOutput('success', 'true');
-            core.setOutput('message', '簽到成功');
+            core.setOutput('message', 'Checkin successful');
             return true;
         } catch (error) {
-            console.error('💥 簽到流程失敗:', error.message);
+            console.error('💥 Checkin process failed:', error.message);
             core.setFailed(error.message);
             core.setOutput('success', 'false');
             core.setOutput('message', error.message);
@@ -242,7 +242,7 @@ class OneMinAutoCheckin {
     }
 }
 
-// 執行簽到
+// Execute checkin
 if (require.main === module) {
     const checkin = new OneMinAutoCheckin();
     checkin.run();

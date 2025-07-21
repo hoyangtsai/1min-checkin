@@ -1,27 +1,27 @@
-// 測試腳本 - 用於本地開發測試
+// Test script - for local development testing
 const OneMinAutoCheckin = require('./index.js');
 
-// 模擬環境變數（僅用於測試）
+// Mock environment variables (for testing only)
 if (!process.env.EMAIL) {
-    console.log('⚠️  請設定環境變數進行測試:');
+    console.log('⚠️  Please set environment variables for testing:');
     console.log('export EMAIL="your-email@example.com"');
     console.log('export PASSWORD="your-password"');
-    console.log('export TOTP_SECRET="your-totp-secret"  # 可選');
+    console.log('export TOTP_SECRET="your-totp-secret"  # Optional');
     console.log('');
-    console.log('然後執行: npm start');
+    console.log('Then run: npm start');
     process.exit(1);
 }
 
 async function test() {
     try {
-        console.log('🧪 開始測試 1min.ai 自動簽到...');
+        console.log('🧪 Starting 1min.ai auto checkin test...');
         
         const checkin = new OneMinAutoCheckin();
         await checkin.run();
         
-        console.log('✅ 測試完成');
+        console.log('✅ Test completed');
     } catch (error) {
-        console.error('❌ 測試失敗:', error.message);
+        console.error('❌ Test failed:', error.message);
         process.exit(1);
     }
 }
