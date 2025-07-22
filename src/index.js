@@ -1,6 +1,5 @@
 const core = require('@actions/core');
 const { OTPAuth } = require('otpauth');
-const fetch = require('node-fetch');
 
 class OneMinAutoCheckin {
     constructor() {

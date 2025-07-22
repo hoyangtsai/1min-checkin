@@ -11,8 +11,7 @@
   },
   "dependencies": {
     "@actions/core": "^1.10.1",
-    "otpauth": "^9.4.0",
-    "node-fetch": "^3.3.2"
+    "otpauth": "^9.4.0"
   },
   "devDependencies": {
     "@vercel/ncc": "^0.38.1"
