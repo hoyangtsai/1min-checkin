@@ -51,12 +51,17 @@ class OneMinAutoCheckin {
         });
 
         try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
             const response = await fetch(loginUrl, {
                 method: 'POST',
                 headers,
-                body
+                body,
+                signal: controller.signal
             });
 
+            clearTimeout(timeoutId);
             const data = await response.json();
             console.log(`📊 Login response status: ${response.status}`);
 
@@ -85,8 +90,13 @@ class OneMinAutoCheckin {
                 throw new Error(errorMsg);
             }
         } catch (error) {
-            console.error('❌ Login failed:', error.message);
-            throw error;
+            if (error.name === 'AbortError') {
+                console.error('❌ Login request timeout');
+                throw new Error('Login request timeout');
+            } else {
+                console.error('❌ Login failed:', error.message);
+                throw error;
+            }
         }
     }
 
@@ -121,12 +131,17 @@ class OneMinAutoCheckin {
         });
 
         try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
             const response = await fetch(mfaUrl, {
                 method: 'POST',
                 headers,
-                body
+                body,
+                signal: controller.signal
             });
 
+            clearTimeout(timeoutId);
             const data = await response.json();
             console.log(`📊 TOTP verification response status: ${response.status}`);
 
@@ -139,8 +154,13 @@ class OneMinAutoCheckin {
                 throw new Error(errorMsg);
             }
         } catch (error) {
-            console.error('❌ TOTP verification failed:', error.message);
-            throw error;
+            if (error.name === 'AbortError') {
+                console.error('❌ TOTP verification timeout');
+                throw new Error('TOTP verification timeout');
+            } else {
+                console.error('❌ TOTP verification failed:', error.message);
+                throw error;
+            }
         }
     }
 
@@ -182,9 +202,9 @@ class OneMinAutoCheckin {
     }
 
     async fetchLatestCredit(teamId, authToken, userName, usedCredit) {
-        console.log(`🔄 Fetching latest credit information (Team ID: ${teamId})`);
+        console.log(`🔄 Starting credit check process (Team ID: ${teamId})`);
+        console.log(`🔑 Using Token: ${authToken ? authToken.substring(0, 10) + '...' : 'null'}`);
 
-        const creditUrl = `https://api.1min.ai/teams/${teamId}/credits`;
         const headers = {
             'Host': 'api.1min.ai',
             'Content-Type': 'application/json',
@@ -196,28 +216,101 @@ class OneMinAutoCheckin {
             'Referer': 'https://app.1min.ai/'
         };
 
+        // Step 1: Get initial credit
+        const initialCredit = await this.getCredits(teamId, authToken, headers);
+        console.log(`💰 Initial credits: ${initialCredit.toLocaleString()}`);
+
+        // Step 2: Check unread notifications to trigger check-in
+        await this.checkUnreadNotifications(authToken, headers);
+
+        // Step 3: Wait and get final credit to detect rewards
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const finalCredit = await this.getCredits(teamId, authToken, headers);
+        console.log(`💰 Final credits: ${finalCredit.toLocaleString()}`);
+
+        const creditDiff = finalCredit - initialCredit;
+        let message = `${userName} | Balance: ${finalCredit.toLocaleString()}`;
+
+        if (creditDiff > 0) {
+            console.log(`🎉 Check-in reward received: +${creditDiff.toLocaleString()} credits`);
+            message += ` (+${creditDiff.toLocaleString()})`;
+        } else if (creditDiff === 0) {
+            console.log(`ℹ️ Already checked in today or no check-in reward`);
+        } else {
+            console.log(`⚠️ Credits decreased: ${creditDiff.toLocaleString()}`);
+        }
+
+        // Calculate percentage
+        const totalCredit = finalCredit + usedCredit;
+        const availablePercent = totalCredit > 0 ? ((finalCredit / totalCredit) * 100).toFixed(1) : 0;
+        message += ` (${availablePercent}%)`;
+
+        console.log(`✅ ${message}`);
+    }
+
+    async getCredits(teamId, authToken, headers) {
+        const creditUrl = `https://api.1min.ai/teams/${teamId}/credits`;
+        console.log(`🌐 Requesting credit URL: ${creditUrl}`);
+
         try {
-            const response = await fetch(creditUrl, { headers });
-            console.log(`📊 Credit API response status: ${response.status}`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+            const response = await fetch(creditUrl, { 
+                headers,
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            console.log(`📊 Credit API status: ${response.status}`);
 
             if (response.status === 200) {
                 const creditData = await response.json();
-                const latestCredit = creditData.credit || 0;
-                const totalCredit = latestCredit + usedCredit;
-                const availablePercent = totalCredit > 0 ? ((latestCredit / totalCredit) * 100).toFixed(1) : 0;
-
-                console.log('💰 Latest Credit Information:');
-                console.log(`   Available: ${latestCredit.toLocaleString()}`);
-                console.log(`   Used: ${usedCredit.toLocaleString()}`);
-                console.log(`   Available percentage: ${availablePercent}%`);
-                console.log(`✅ ${userName} login successful | Balance: ${latestCredit.toLocaleString()} (${availablePercent}%)`);
+                return creditData.credit || 0;
             } else {
-                console.log(`❌ Failed to fetch credit - Status: ${response.status}`);
-                console.log(`✅ ${userName} login successful`);
+                console.log(`❌ Credit API failed - Status: ${response.status}`);
+                return 0;
             }
         } catch (error) {
-            console.error('❌ Failed to fetch credit information:', error.message);
-            console.log(`✅ ${userName} login successful`);
+            if (error.name === 'AbortError') {
+                console.log(`⏰ Credit API request timeout`);
+            } else {
+                console.log(`❌ Credit API error: ${error.message}`);
+            }
+            return 0;
+        }
+    }
+
+    async checkUnreadNotifications(authToken, headers) {
+        const notificationUrl = 'https://api.1min.ai/notifications/unread';
+        console.log(`🔔 Checking unread notifications: ${notificationUrl}`);
+
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+            const response = await fetch(notificationUrl, { 
+                headers,
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            console.log(`📊 Notification API status: ${response.status}`);
+
+            if (response.status === 200) {
+                const notificationData = await response.json();
+                console.log(`📬 Unread notification count: ${notificationData.count || 0}`);
+                const responseText = JSON.stringify(notificationData);
+                console.log(`📄 Notification response: ${responseText.substring(0, 200)}`);
+            } else {
+                console.log(`❌ Notification API failed - Status: ${response.status}`);
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.log(`⏰ Notification API request timeout`);
+            } else {
+                console.log(`❌ Notification API error: ${error.message}`);
+            }
         }
     }
 
