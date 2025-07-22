@@ -102,7 +102,8 @@ class OneMinAutoCheckin {
     async performMFAVerification(tempToken) {
         console.log('🔐 Starting TOTP verification process...');
 
-        const totp = new OTPAuth.TOTP({
+        const { TOTP } = OTPAuth;
+        const totp = new TOTP({
             secret: this.totpSecret,
             digits: 6,
             period: 30,
