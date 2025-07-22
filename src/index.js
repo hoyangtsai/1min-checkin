@@ -1,5 +1,5 @@
 const core = require('@actions/core');
-const { OTPAuth } = require('otpauth');
+const OTPAuth = require('otpauth');
 
 class OneMinAutoCheckin {
     constructor() {
@@ -102,8 +102,7 @@ class OneMinAutoCheckin {
     async performMFAVerification(tempToken) {
         console.log('🔐 Starting TOTP verification process...');
 
-        const { TOTP } = OTPAuth;
-        const totp = new TOTP({
+        const totp = new OTPAuth.TOTP({
             secret: this.totpSecret,
             digits: 6,
             period: 30,
