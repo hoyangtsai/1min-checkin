@@ -39,7 +39,7 @@ Edit the cron expression in the `.github/workflows/daily-checkin.yml` file:
 
 ```yaml
 schedule:
-  - cron: '0 8 * * *'  # Daily at UTC 8:00 (Taipei time 16:00)
+  - cron: '5 8 * * *'  # Daily at UTC 8:05 (Taipei time 16:05)
 ```
 
 Common time settings:
