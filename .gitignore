@@ -54,3 +54,6 @@ ehthumbs.db
 .idea/
 *.swp
 *.swo
+
+dist/
+

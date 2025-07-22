@@ -23,12 +23,15 @@ jobs:
     - name: Install dependencies
       run: npm install
 
+    - name: Build project
+      run: npm run build
+
     - name: Run auto checkin
       env:
         EMAIL: ${{ secrets.EMAIL }}
         PASSWORD: ${{ secrets.PASSWORD }}
         TOTP_SECRET: ${{ secrets.TOTP_SECRET }}
-      run: npm start
+      run: node dist/index.js
 
     - name: Upload execution logs
       if: always()
