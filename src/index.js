@@ -6,7 +6,7 @@ class OneMinAutoCheckin {
         // Prioritize GitHub Action inputs, then environment variables
         this.email = core.getInput('email') || process.env.EMAIL;
         this.password = core.getInput('password') || process.env.PASSWORD;
-        this.totpSecret = core.getInput('totp_secret') || process.env.TOTP_SECRET;
+        this.totpSecret = this.validateTotpSecret(core.getInput('totp_secret') || process.env.TOTP_SECRET);
         this.deviceId = this.generateDeviceId();
         
         if (!this.email || !this.password) {
@@ -19,14 +19,24 @@ class OneMinAutoCheckin {
         console.log(`🔐 TOTP: ${this.totpSecret ? 'Configured' : 'Not configured'}`);
     }
 
+    validateTotpSecret(secret) {
+        // Filter invalid TOTP values (empty string, null string, etc.)
+        return secret && secret !== 'null' && secret.trim() !== '' ? secret : null;
+    }
+
     generateDeviceId() {
         const chars = '0123456789abcdef';
         const randomString = (length) =>
             Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 
+        // Generate more realistic random combinations
         const part1 = randomString(16);
         const part2 = randomString(15);
-        return `$device:${part1}-${part2}-17525636-16a7f0-${part1}`;
+        const part3 = randomString(8);  // Replace fixed 17525636
+        const part4 = randomString(6);  // Replace fixed 16a7f0
+        const part5 = randomString(16); // Replace duplicate part1
+
+        return `$device:${part1}-${part2}-${part3}-${part4}-${part5}`;
     }
 
     async login() {
@@ -166,41 +176,64 @@ class OneMinAutoCheckin {
     async displayCreditInfo(responseData) {
         try {
             const user = responseData.user;
-            if (user && user.teams && user.teams.length > 0) {
-                const teamInfo = user.teams[0];
-                const teamId = teamInfo.teamId || teamInfo.team.uuid;
-                const authToken = responseData.token || responseData.user.token;
-
-                const userName = (user.teams && user.teams[0] && user.teams[0].userName) ?
-                    user.teams[0].userName :
-                    (user.email ? user.email.split('@')[0] : 'User');
-
-                if (teamId && authToken) {
-                    const usedCredit = teamInfo.usedCredit || 0;
-                    await this.fetchLatestCredit(teamId, authToken, userName, usedCredit);
-                } else {
-                    const remainingCredit = teamInfo.team.credit || 0;
-                    const usedCredit = teamInfo.usedCredit || 0;
-                    const totalCredit = remainingCredit + usedCredit;
-                    const availablePercent = totalCredit > 0 ? ((remainingCredit / totalCredit) * 100).toFixed(1) : 0;
-
-                    console.log('💰 Credit Information:');
-                    console.log(`   Available: ${remainingCredit.toLocaleString()}`);
-                    console.log(`   Used: ${usedCredit.toLocaleString()}`);
-                    console.log(`   Available percentage: ${availablePercent}%`);
-                    console.log(`✅ ${userName} login successful | Balance: ${remainingCredit.toLocaleString()} (${availablePercent}%)`);
-                }
-            } else {
+            if (!user?.teams || user.teams.length === 0) {
                 console.log('⚠️ Unable to retrieve credit information');
                 console.log('✅ Login successful!');
+                return;
             }
+
+            const authToken = responseData.token || responseData.user?.token;
+            const userUuid = user.uuid;
+
+            // Find the team that matches the current user (subscription.userId matches current user uuid)
+            let targetTeam = null;
+
+            for (const team of user.teams) {
+                const subscriptionUserId = team.team?.subscription?.userId;
+                if (subscriptionUserId === userUuid) {
+                    targetTeam = team;
+                    console.log(`🎯 Found matching team: ${team.teamId || team.team?.uuid} (subscription matches user)`);
+                    break;
+                }
+            }
+
+            // If no matching team found, use the first team as fallback
+            if (!targetTeam && user.teams.length > 0) {
+                targetTeam = user.teams[0];
+                console.log(`📋 Using fallback team: ${targetTeam.teamId || targetTeam.team?.uuid} (first available)`);
+            }
+
+            if (!targetTeam) {
+                console.log('❌ Unable to find any team');
+                console.log('✅ Login successful!');
+                return;
+            }
+
+            const teamInfo = targetTeam;
+            const teamId = teamInfo.teamId || teamInfo.team?.uuid;
+            const userName = teamInfo.userName || user.email?.split('@')[0] || 'User';
+            const usedCredit = teamInfo.usedCredit || 0;
+            const initialCredit = teamInfo.team?.credit || 0;
+
+            console.log(`👤 User: ${userName}`);
+            console.log(`🏢 Team ID: ${teamId}`);
+            console.log(`💰 Initial Credit: ${initialCredit.toLocaleString()}`);
+
+            if (!teamId || !authToken) {
+                const percent = this.calculatePercent(initialCredit, usedCredit);
+                console.log(`✅ ${userName} login successful | Balance: ${initialCredit.toLocaleString()} (${percent}%)`);
+                return;
+            }
+
+            // Check daily bonus
+            await this.fetchLatestCredit(teamId, authToken, userName, usedCredit, initialCredit);
         } catch (error) {
             console.error('❌ Error displaying credit information:', error.message);
             console.log('✅ Login successful!');
         }
     }
 
-    async fetchLatestCredit(teamId, authToken, userName, usedCredit) {
+    async fetchLatestCredit(teamId, authToken, userName, usedCredit, initialCredit = 0) {
         console.log(`🔄 Starting credit check process (Team ID: ${teamId})`);
         console.log(`🔑 Using Token: ${authToken ? authToken.substring(0, 10) + '...' : 'null'}`);
 
@@ -215,19 +248,19 @@ class OneMinAutoCheckin {
             'Referer': 'https://app.1min.ai/'
         };
 
-        // Step 1: Get initial credit
-        const initialCredit = await this.getCredits(teamId, authToken, headers);
-        console.log(`💰 Initial credits: ${initialCredit.toLocaleString()}`);
+        // Step 1: Get current credit (or use provided initial credit)
+        const currentCredit = initialCredit > 0 ? initialCredit : await this.getCredits(teamId, authToken, headers);
+        console.log(`💰 Current credits: ${currentCredit.toLocaleString()}`);
 
         // Step 2: Check unread notifications to trigger check-in
         await this.checkUnreadNotifications(authToken, headers);
 
-        // Step 3: Wait and get final credit to detect rewards
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Step 3: Wait 3 seconds and get final credit to detect rewards
+        await new Promise(resolve => setTimeout(resolve, 3000));
         const finalCredit = await this.getCredits(teamId, authToken, headers);
         console.log(`💰 Final credits: ${finalCredit.toLocaleString()}`);
 
-        const creditDiff = finalCredit - initialCredit;
+        const creditDiff = finalCredit - currentCredit;
         let message = `${userName} | Balance: ${finalCredit.toLocaleString()}`;
 
         if (creditDiff > 0) {
@@ -311,6 +344,11 @@ class OneMinAutoCheckin {
                 console.log(`❌ Notification API error: ${error.message}`);
             }
         }
+    }
+
+    calculatePercent(remainingCredit, usedCredit) {
+        const total = remainingCredit + usedCredit;
+        return total > 0 ? ((remainingCredit / total) * 100).toFixed(1) : 0;
     }
 
     async run() {
