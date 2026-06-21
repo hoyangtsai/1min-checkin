@@ -12,9 +12,15 @@ inputs:
   totp_secret:
     description: 'TOTP secret key (if 2FA is enabled)'
     required: false
+  telegram_bot_token:
+    description: 'Telegram bot token for notifications (optional)'
+    required: false
+  telegram_chat_id:
+    description: 'Telegram chat ID for notifications (optional)'
+    required: false
 
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'
 
 branding:

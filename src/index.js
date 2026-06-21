@@ -1,381 +1,391 @@
-const core = require('@actions/core');
-const OTPAuth = require('otpauth');
+const core = require("@actions/core");
+const crypto = require("node:crypto");
+const OTPAuth = require("otpauth");
+const { notify } = require("./notifier.js");
+
+const REQUEST_TIMEOUT_MS = 10000;
+const CHECKIN_SETTLE_MS = 3000;
+const USER_AGENT =
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 
 class OneMinAutoCheckin {
-    constructor() {
-        // Prioritize GitHub Action inputs, then environment variables
-        this.email = core.getInput('email') || process.env.EMAIL;
-        this.password = core.getInput('password') || process.env.PASSWORD;
-        this.totpSecret = this.validateTotpSecret(core.getInput('totp_secret') || process.env.TOTP_SECRET);
-        this.deviceId = this.generateDeviceId();
-        
-        if (!this.email || !this.password) {
-            const error = 'Missing required parameters: email and password';
-            core.setFailed(error);
-            throw new Error(error);
-        }
-        
-        console.log(`📧 Account: ${this.email.substring(0, 3)}***${this.email.substring(this.email.indexOf('@'))}`);
-        console.log(`🔐 TOTP: ${this.totpSecret ? 'Configured' : 'Not configured'}`);
-    }
+	constructor() {
+		this.email = core.getInput("email") || process.env.EMAIL;
+		this.password = core.getInput("password") || process.env.PASSWORD;
+		this.totpSecret = this.validateTotpSecret(
+			core.getInput("totp_secret") || process.env.TOTP_SECRET,
+		);
+		this.deviceId = this.generateDeviceId();
 
-    validateTotpSecret(secret) {
-        // Filter invalid TOTP values (empty string, null string, etc.)
-        return secret && secret !== 'null' && secret.trim() !== '' ? secret : null;
-    }
+		if (!this.email || !this.password) {
+			const error = "Missing required parameters: email and password";
+			core.setFailed(error);
+			throw new Error(error);
+		}
 
-    generateDeviceId() {
-        const chars = '0123456789abcdef';
-        const randomString = (length) =>
-            Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+		const atIdx = this.email.indexOf("@");
+		const masked =
+			atIdx > 0
+				? `${this.email.substring(0, Math.min(3, atIdx))}***${this.email.substring(atIdx)}`
+				: "***";
+		core.info(`Account: ${masked}`);
+		core.info(`TOTP: ${this.totpSecret ? "Configured" : "Not configured"}`);
+	}
 
-        // Generate more realistic random combinations
-        const part1 = randomString(16);
-        const part2 = randomString(15);
-        const part3 = randomString(8);  // Replace fixed 17525636
-        const part4 = randomString(6);  // Replace fixed 16a7f0
-        const part5 = randomString(16); // Replace duplicate part1
+	validateTotpSecret(secret) {
+		return secret && secret !== "null" && secret.trim() !== "" ? secret : null;
+	}
 
-        return `$device:${part1}-${part2}-${part3}-${part4}-${part5}`;
-    }
+	generateDeviceId() {
+		const randomHex = (length) =>
+			crypto.randomBytes(length).toString("hex").slice(0, length);
 
-    async login() {
-        console.log('🚀 Starting login request...');
-        
-        const loginUrl = 'https://api.1min.ai/auth/login';
-        const headers = {
-            'Host': 'api.1min.ai',
-            'Content-Type': 'application/json',
-            'X-Auth-Token': 'Bearer',
-            'Mp-Identity': this.deviceId,
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Origin': 'https://app.1min.ai',
-            'Referer': 'https://app.1min.ai/'
-        };
+		return `$device:${randomHex(16)}-${randomHex(15)}-${randomHex(8)}-${randomHex(6)}-${randomHex(16)}`;
+	}
 
-        const body = JSON.stringify({
-            email: this.email,
-            password: this.password
-        });
+	buildHeaders(authToken) {
+		return {
+			Host: "api.1min.ai",
+			"Content-Type": "application/json",
+			"X-Auth-Token": authToken ? `Bearer ${authToken}` : "Bearer",
+			"Mp-Identity": this.deviceId,
+			"User-Agent": USER_AGENT,
+			Accept: "application/json, text/plain, */*",
+			Origin: "https://app.1min.ai",
+			Referer: "https://app.1min.ai/",
+		};
+	}
 
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
+	async fetchWithTimeout(url, options = {}) {
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-            const response = await fetch(loginUrl, {
-                method: 'POST',
-                headers,
-                body,
-                signal: controller.signal
-            });
+		try {
+			const response = await fetch(url, {
+				...options,
+				signal: controller.signal,
+			});
+			return response;
+		} finally {
+			clearTimeout(timeoutId);
+		}
+	}
 
-            clearTimeout(timeoutId);
-            const data = await response.json();
-            console.log(`📊 Login response status: ${response.status}`);
+	async login() {
+		core.info("Starting login request...");
 
-            if (response.status === 200 && data.user) {
-                if (data.user.mfaRequired) {
-                    console.log('🔐 TOTP verification required');
-                    if (this.totpSecret) {
-                        return await this.performMFAVerification(data.user.token);
-                    } else {
-                        throw new Error('TOTP required but secret key not provided');
-                    }
-                } else {
-                    console.log('✅ Login successful (no TOTP required)');
-                    await this.displayCreditInfo(data);
-                    return data;
-                }
-            } else {
-                let errorMsg = 'Login failed';
-                if (data.message) {
-                    errorMsg = data.message;
-                } else if (response.status === 401) {
-                    errorMsg = 'Invalid email or password';
-                } else if (response.status === 429) {
-                    errorMsg = 'Too many requests, please try again later';
-                }
-                throw new Error(errorMsg);
-            }
-        } catch (error) {
-            if (error.name === 'AbortError') {
-                console.error('❌ Login request timeout');
-                throw new Error('Login request timeout');
-            } else {
-                console.error('❌ Login failed:', error.message);
-                throw error;
-            }
-        }
-    }
+		const body = JSON.stringify({
+			email: this.email,
+			password: this.password,
+		});
 
-    async performMFAVerification(tempToken) {
-        console.log('🔐 Starting TOTP verification process...');
+		try {
+			const response = await this.fetchWithTimeout(
+				"https://api.1min.ai/auth/login",
+				{
+					method: "POST",
+					headers: this.buildHeaders(),
+					body,
+				},
+			);
 
-        const totp = new OTPAuth.TOTP({
-            secret: this.totpSecret,
-            digits: 6,
-            period: 30,
-            algorithm: 'SHA1'
-        });
+			const data = await response.json();
+			core.info(`Login response status: ${response.status}`);
 
-        const totpCode = totp.generate();
-        console.log('🎯 Generated TOTP verification code');
+			if (response.status === 200 && data.user) {
+				if (data.user.mfaRequired) {
+					core.info("TOTP verification required");
+					if (this.totpSecret) {
+						return await this.performMFAVerification(data.user.token);
+					} else {
+						throw new Error("TOTP required but secret key not provided");
+					}
+				} else {
+					core.info("Login successful (no TOTP required)");
+					return await this.displayCreditInfo(data);
+				}
+			} else {
+				let errorMsg = "Login failed";
+				if (data.message) {
+					errorMsg = data.message;
+				} else if (response.status === 401) {
+					errorMsg = "Invalid email or password";
+				} else if (response.status === 429) {
+					errorMsg = "Too many requests, please try again later";
+				}
+				throw new Error(errorMsg);
+			}
+		} catch (error) {
+			if (error.name === "AbortError") {
+				throw new Error("Login request timeout");
+			}
+			throw error;
+		}
+	}
 
-        const mfaUrl = 'https://api.1min.ai/auth/mfa/verify';
-        const headers = {
-            'Host': 'api.1min.ai',
-            'Content-Type': 'application/json',
-            'X-Auth-Token': 'Bearer',
-            'Mp-Identity': this.deviceId,
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Origin': 'https://app.1min.ai',
-            'Referer': 'https://app.1min.ai/'
-        };
+	async performMFAVerification(tempToken) {
+		core.info("Starting TOTP verification process...");
 
-        const body = JSON.stringify({
-            code: totpCode,
-            token: tempToken
-        });
+		const totp = new OTPAuth.TOTP({
+			secret: this.totpSecret,
+			digits: 6,
+			period: 30,
+			algorithm: "SHA1",
+		});
 
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
+		const totpCode = totp.generate();
+		core.info("Generated TOTP verification code");
 
-            const response = await fetch(mfaUrl, {
-                method: 'POST',
-                headers,
-                body,
-                signal: controller.signal
-            });
+		const body = JSON.stringify({
+			code: totpCode,
+			token: tempToken,
+		});
 
-            clearTimeout(timeoutId);
-            const data = await response.json();
-            console.log(`📊 TOTP verification response status: ${response.status}`);
+		try {
+			const response = await this.fetchWithTimeout(
+				"https://api.1min.ai/auth/mfa/verify",
+				{
+					method: "POST",
+					headers: this.buildHeaders(),
+					body,
+				},
+			);
 
-            if (response.status === 200) {
-                console.log('✅ TOTP verification successful!');
-                await this.displayCreditInfo(data);
-                return data;
-            } else {
-                const errorMsg = data.message || `HTTP ${response.status}`;
-                throw new Error(errorMsg);
-            }
-        } catch (error) {
-            if (error.name === 'AbortError') {
-                console.error('❌ TOTP verification timeout');
-                throw new Error('TOTP verification timeout');
-            } else {
-                console.error('❌ TOTP verification failed:', error.message);
-                throw error;
-            }
-        }
-    }
+			const data = await response.json();
+			core.info(`TOTP verification response status: ${response.status}`);
 
-    async displayCreditInfo(responseData) {
-        try {
-            const user = responseData.user;
-            if (!user?.teams || user.teams.length === 0) {
-                console.log('⚠️ Unable to retrieve credit information');
-                console.log('✅ Login successful!');
-                return;
-            }
+			if (response.status === 200) {
+				core.info("TOTP verification successful!");
+				return await this.displayCreditInfo(data);
+			} else {
+				const errorMsg = data.message || `HTTP ${response.status}`;
+				throw new Error(errorMsg);
+			}
+		} catch (error) {
+			if (error.name === "AbortError") {
+				throw new Error("TOTP verification timeout");
+			}
+			throw error;
+		}
+	}
 
-            const authToken = responseData.token || responseData.user?.token;
-            const userUuid = user.uuid;
+	async displayCreditInfo(responseData) {
+		try {
+			const user = responseData.user;
+			if (!user?.teams || user.teams.length === 0) {
+				core.warning("Unable to retrieve credit information");
+				core.info("Login successful!");
+				return null;
+			}
 
-            // Find the team that matches the current user (subscription.userId matches current user uuid)
-            let targetTeam = null;
+			const authToken = responseData.token || responseData.user?.token;
+			const userUuid = user.uuid;
 
-            for (const team of user.teams) {
-                const subscriptionUserId = team.team?.subscription?.userId;
-                if (subscriptionUserId === userUuid) {
-                    targetTeam = team;
-                    console.log(`🎯 Found matching team: ${team.teamId || team.team?.uuid} (subscription matches user)`);
-                    break;
-                }
-            }
+			let targetTeam = null;
 
-            // If no matching team found, use the first team as fallback
-            if (!targetTeam && user.teams.length > 0) {
-                targetTeam = user.teams[0];
-                console.log(`📋 Using fallback team: ${targetTeam.teamId || targetTeam.team?.uuid} (first available)`);
-            }
+			for (const team of user.teams) {
+				const subscriptionUserId = team.team?.subscription?.userId;
+				if (subscriptionUserId === userUuid) {
+					targetTeam = team;
+					core.debug(
+						`Found matching team: ${team.teamId || team.team?.uuid} (subscription matches user)`,
+					);
+					break;
+				}
+			}
 
-            if (!targetTeam) {
-                console.log('❌ Unable to find any team');
-                console.log('✅ Login successful!');
-                return;
-            }
+			if (!targetTeam && user.teams.length > 0) {
+				targetTeam = user.teams[0];
+				core.debug(
+					`Using fallback team: ${targetTeam.teamId || targetTeam.team?.uuid} (first available)`,
+				);
+			}
 
-            const teamInfo = targetTeam;
-            const teamId = teamInfo.teamId || teamInfo.team?.uuid;
-            const userName = teamInfo.userName || user.email?.split('@')[0] || 'User';
-            const usedCredit = teamInfo.usedCredit || 0;
-            const initialCredit = teamInfo.team?.credit || 0;
+			if (!targetTeam) {
+				core.warning("Unable to find any team");
+				core.info("Login successful!");
+				return null;
+			}
 
-            console.log(`👤 User: ${userName}`);
-            console.log(`🏢 Team ID: ${teamId}`);
-            console.log(`💰 Initial Credit: ${initialCredit.toLocaleString()}`);
+			const teamInfo = targetTeam;
+			const teamId = teamInfo.teamId || teamInfo.team?.uuid;
+			const userName = teamInfo.userName || user.email?.split("@")[0] || "User";
+			const usedCredit = teamInfo.usedCredit || 0;
+			const initialCredit = teamInfo.team?.credit || 0;
 
-            if (!teamId || !authToken) {
-                const percent = this.calculatePercent(initialCredit, usedCredit);
-                console.log(`✅ ${userName} login successful | Balance: ${initialCredit.toLocaleString()} (${percent}%)`);
-                return;
-            }
+			core.info(`User: ${userName}`);
+			core.debug(`Team ID: ${teamId}`);
+			core.info(`Initial Credit: ${initialCredit.toLocaleString()}`);
 
-            // Check daily bonus
-            await this.fetchLatestCredit(teamId, authToken, userName, usedCredit, initialCredit);
-        } catch (error) {
-            console.error('❌ Error displaying credit information:', error.message);
-            console.log('✅ Login successful!');
-        }
-    }
+			if (!teamId || !authToken) {
+				const percent = this.calculatePercent(initialCredit, usedCredit);
+				core.info(
+					`${userName} login successful | Balance: ${initialCredit.toLocaleString()} (${percent}%)`,
+				);
+				return {
+					userName,
+					finalCredit: initialCredit,
+					creditDiff: 0,
+					availablePercent: String(percent),
+				};
+			}
 
-    async fetchLatestCredit(teamId, authToken, userName, usedCredit, initialCredit = 0) {
-        console.log(`🔄 Starting credit check process (Team ID: ${teamId})`);
-        console.log(`🔑 Using Token: ${authToken ? authToken.substring(0, 10) + '...' : 'null'}`);
+			return await this.fetchLatestCredit(
+				teamId,
+				authToken,
+				userName,
+				usedCredit,
+				initialCredit,
+			);
+		} catch (error) {
+			core.error(`Error displaying credit information: ${error.message}`);
+			core.info("Login successful!");
+			return null;
+		}
+	}
 
-        const headers = {
-            'Host': 'api.1min.ai',
-            'Content-Type': 'application/json',
-            'X-Auth-Token': `Bearer ${authToken}`,
-            'Mp-Identity': this.deviceId,
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Origin': 'https://app.1min.ai',
-            'Referer': 'https://app.1min.ai/'
-        };
+	async fetchLatestCredit(
+		teamId,
+		authToken,
+		userName,
+		usedCredit,
+		initialCredit = 0,
+	) {
+		core.debug(`Starting credit check process (Team ID: ${teamId})`);
+		core.debug("Auth token: [present]");
 
-        // Step 1: Get current credit (or use provided initial credit)
-        const currentCredit = initialCredit > 0 ? initialCredit : await this.getCredits(teamId, authToken, headers);
-        console.log(`💰 Current credits: ${currentCredit.toLocaleString()}`);
+		const headers = this.buildHeaders(authToken);
 
-        // Step 2: Check unread notifications to trigger check-in
-        await this.checkUnreadNotifications(authToken, headers);
+		// Get current credit (or use provided initial credit)
+		const currentCredit =
+			initialCredit > 0
+				? initialCredit
+				: await this.getCredits(teamId, headers);
+		core.info(`Current credits: ${currentCredit.toLocaleString()}`);
 
-        // Step 3: Wait 3 seconds and get final credit to detect rewards
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        const finalCredit = await this.getCredits(teamId, authToken, headers);
-        console.log(`💰 Final credits: ${finalCredit.toLocaleString()}`);
+		// Check unread notifications to trigger check-in
+		await this.checkUnreadNotifications(headers);
 
-        const creditDiff = finalCredit - currentCredit;
-        let message = `${userName} | Balance: ${finalCredit.toLocaleString()}`;
+		// Wait for check-in reward to settle before re-checking credits
+		await new Promise((resolve) => setTimeout(resolve, CHECKIN_SETTLE_MS));
+		const finalCredit = await this.getCredits(teamId, headers);
+		core.info(`Final credits: ${finalCredit.toLocaleString()}`);
 
-        if (creditDiff > 0) {
-            console.log(`🎉 Check-in reward received: +${creditDiff.toLocaleString()} credits`);
-            message += ` (+${creditDiff.toLocaleString()})`;
-        } else if (creditDiff === 0) {
-            console.log(`ℹ️ Already checked in today or no check-in reward`);
-        } else {
-            console.log(`⚠️ Credits decreased: ${creditDiff.toLocaleString()}`);
-        }
+		const creditDiff = finalCredit - currentCredit;
+		let message = `${userName} | Balance: ${finalCredit.toLocaleString()}`;
 
-        // Calculate percentage
-        const totalCredit = finalCredit + usedCredit;
-        const availablePercent = totalCredit > 0 ? ((finalCredit / totalCredit) * 100).toFixed(1) : 0;
-        message += ` (${availablePercent}%)`;
+		if (creditDiff > 0) {
+			core.info(
+				`Check-in reward received: +${creditDiff.toLocaleString()} credits`,
+			);
+			message += ` (+${creditDiff.toLocaleString()})`;
+		} else if (creditDiff === 0) {
+			core.info("Already checked in today or no check-in reward");
+		} else {
+			core.warning(`Credits decreased: ${creditDiff.toLocaleString()}`);
+		}
 
-        console.log(`✅ ${message}`);
-    }
+		const totalCredit = finalCredit + usedCredit;
+		const availablePercent =
+			totalCredit > 0 ? ((finalCredit / totalCredit) * 100).toFixed(1) : "0";
+		message += ` (${availablePercent}%)`;
 
-    async getCredits(teamId, authToken, headers) {
-        const creditUrl = `https://api.1min.ai/teams/${teamId}/credits`;
-        console.log(`🌐 Requesting credit URL: ${creditUrl}`);
+		core.info(message);
 
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
+		return { userName, finalCredit, creditDiff, availablePercent };
+	}
 
-            const response = await fetch(creditUrl, { 
-                headers,
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeoutId);
-            console.log(`📊 Credit API status: ${response.status}`);
+	async getCredits(teamId, headers) {
+		const creditUrl = `https://api.1min.ai/teams/${teamId}/credits`;
+		core.debug(`Requesting credit URL: ${creditUrl}`);
 
-            if (response.status === 200) {
-                const creditData = await response.json();
-                return creditData.credit || 0;
-            } else {
-                console.log(`❌ Credit API failed - Status: ${response.status}`);
-                return 0;
-            }
-        } catch (error) {
-            if (error.name === 'AbortError') {
-                console.log(`⏰ Credit API request timeout`);
-            } else {
-                console.log(`❌ Credit API error: ${error.message}`);
-            }
-            return 0;
-        }
-    }
+		try {
+			const response = await this.fetchWithTimeout(creditUrl, { headers });
+			core.debug(`Credit API status: ${response.status}`);
 
-    async checkUnreadNotifications(authToken, headers) {
-        const notificationUrl = 'https://api.1min.ai/notifications/unread';
-        console.log(`🔔 Checking unread notifications: ${notificationUrl}`);
+			if (response.status === 200) {
+				const creditData = await response.json();
+				return creditData.credit || 0;
+			} else {
+				core.warning(`Credit API failed - Status: ${response.status}`);
+				return 0;
+			}
+		} catch (error) {
+			const reason = error.name === "AbortError" ? "timeout" : error.message;
+			core.warning(`Credit API error: ${reason}`);
+			return 0;
+		}
+	}
 
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
+	async checkUnreadNotifications(headers) {
+		const notificationUrl = "https://api.1min.ai/notifications/unread";
+		core.debug(`Checking unread notifications: ${notificationUrl}`);
 
-            const response = await fetch(notificationUrl, { 
-                headers,
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeoutId);
-            console.log(`📊 Notification API status: ${response.status}`);
+		try {
+			const response = await this.fetchWithTimeout(notificationUrl, {
+				headers,
+			});
+			core.debug(`Notification API status: ${response.status}`);
 
-            if (response.status === 200) {
-                const notificationData = await response.json();
-                console.log(`📬 Unread notification count: ${notificationData.count || 0}`);
-                const responseText = JSON.stringify(notificationData);
-                console.log(`📄 Notification response: ${responseText.substring(0, 200)}`);
-            } else {
-                console.log(`❌ Notification API failed - Status: ${response.status}`);
-            }
-        } catch (error) {
-            if (error.name === 'AbortError') {
-                console.log(`⏰ Notification API request timeout`);
-            } else {
-                console.log(`❌ Notification API error: ${error.message}`);
-            }
-        }
-    }
+			if (response.status === 200) {
+				const notificationData = await response.json();
+				core.info(`Unread notifications: ${notificationData.count || 0}`);
+			} else {
+				core.warning(`Notification API failed - Status: ${response.status}`);
+			}
+		} catch (error) {
+			const reason = error.name === "AbortError" ? "timeout" : error.message;
+			core.warning(`Notification API error: ${reason}`);
+		}
+	}
 
-    calculatePercent(remainingCredit, usedCredit) {
-        const total = remainingCredit + usedCredit;
-        return total > 0 ? ((remainingCredit / total) * 100).toFixed(1) : 0;
-    }
+	calculatePercent(remainingCredit, usedCredit) {
+		const total = remainingCredit + usedCredit;
+		return total > 0 ? ((remainingCredit / total) * 100).toFixed(1) : 0;
+	}
 
-    async run() {
-        try {
-            console.log('🎬 1min.ai auto checkin started');
-            console.log(`⏰ Execution time: ${new Date().toLocaleString()}`);
-            
-            await this.login();
-            
-            console.log('🎉 Checkin process completed');
-            core.setOutput('success', 'true');
-            core.setOutput('message', 'Checkin successful');
-            return true;
-        } catch (error) {
-            console.error('💥 Checkin process failed:', error.message);
-            core.setFailed(error.message);
-            core.setOutput('success', 'false');
-            core.setOutput('message', error.message);
-            process.exit(1);
-        }
-    }
+	async run() {
+		let outcome;
+		try {
+			core.info("1min.ai auto checkin started");
+			core.info(`Execution time: ${new Date().toISOString()}`);
+
+			const loginResult = await this.login();
+
+			core.info("Checkin process completed");
+			core.setOutput("success", "true");
+			core.setOutput("message", "Checkin successful");
+
+			outcome = {
+				success: true,
+				userName: loginResult?.userName,
+				finalCredit: loginResult?.finalCredit,
+				creditDiff: loginResult?.creditDiff,
+				availablePercent: loginResult?.availablePercent,
+			};
+			await notify(outcome);
+			return true;
+		} catch (error) {
+			core.error(`Checkin process failed: ${error.message}`);
+			core.setFailed(error.message);
+			core.setOutput("success", "false");
+			core.setOutput("message", error.message);
+
+			outcome = { success: false, error: error.message };
+			try {
+				await notify(outcome);
+			} catch (notifyError) {
+				core.warning(`Notify error: ${notifyError.message}`);
+			}
+			process.exit(1);
+		}
+	}
 }
 
 // Execute checkin
 if (require.main === module) {
-    const checkin = new OneMinAutoCheckin();
-    checkin.run();
+	const checkin = new OneMinAutoCheckin();
+	checkin.run();
 }
 
 module.exports = OneMinAutoCheckin;

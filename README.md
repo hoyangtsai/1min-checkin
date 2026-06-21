@@ -26,6 +26,10 @@ In your GitHub project, go to `Settings` > `Secrets and variables` > `Actions`, 
 
 **Optional Settings:**
 - `TOTP_SECRET`: Your TOTP secret key (only needed if two-factor authentication is enabled)
+- `TELEGRAM_BOT_TOKEN`: Telegram bot token (from [@BotFather](https://t.me/BotFather)) — required for Telegram notifications
+- `TELEGRAM_CHAT_ID`: Telegram chat ID to receive notifications
+
+If both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set, the workflow sends a Markdown-formatted message to that chat after every run — success (with balance + reward) or failure (with error). If either is missing, notifications are skipped silently.
 
 ### 3. Enable GitHub Actions
 
@@ -75,13 +79,22 @@ npm start
 
 ```
 ├── .github/workflows/
-│   └── daily-checkin.yml    # GitHub Action workflow
+│   ├── daily-checkin.yml    # Daily check-in workflow (cron + manual)
+│   └── release.yml          # GitHub release on tag push
 ├── src/
-│   └── index.js             # Main check-in logic
+│   ├── index.js             # Main check-in logic (OneMinAutoCheckin class)
+│   ├── notifier.js          # Telegram notification sender
+│   ├── test.js              # Local live runner
+│   └── unit-test.js         # Offline unit tests
+├── action.yml               # GitHub Action manifest (Node 24)
 ├── package.json             # Project configuration file
 ├── LICENSE                  # MIT License
 └── README.md               # Documentation
 ```
+
+## Requirements
+
+- Node.js **24** or later (Active LTS; matches the GitHub Action runtime).
 
 ## Important Notes
 
