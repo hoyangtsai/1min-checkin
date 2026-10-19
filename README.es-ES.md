@@ -2,13 +2,15 @@
 
 Esta es una GitHub Action para el check-in diario automático en 1min.ai, compatible con inicio de sesión por correo electrónico/contraseña y autenticación de dos factores TOTP.
 
+1min.ai otorga a cada cuenta **15,000 créditos gratuitos al día** la primera vez que inicia sesión (aparecen como `DAILY_FREE_CREDIT` en el historial de créditos). Esta Action existe para reclamar esa recompensa automáticamente: inicia sesión una vez al día y luego informa tu saldo y cuántos créditos se añadieron. Si ya iniciaste sesión tú mismo ese día, la ejecución no mostrará recompensa, porque el crédito diario ya fue reclamado.
+
 ## Características
 
-- 🤖 Check-in diario automático
+- 🎁 Reclama automáticamente los 15,000 créditos gratuitos diarios
 - 🔐 Soporte para autenticación de dos factores TOTP
 - 📊 Visualización de la información del saldo de la cuenta
 - ⏰ Tiempo de ejecución personalizable
-- 📝 Guardado automático de logs de ejecución
+- 📨 Notificación opcional por Telegram después de cada ejecución
 
 ## Inicio Rápido
 

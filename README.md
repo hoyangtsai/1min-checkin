@@ -2,13 +2,15 @@
 
 This is a GitHub Action for automatic daily check-in to 1min.ai, supporting email/password login and TOTP two-factor authentication.
 
+1min.ai gives every account **15,000 free credits per day** the first time it logs in (shown as `DAILY_FREE_CREDIT` in your credit history). This Action exists to claim that reward automatically: it logs in once a day, then reports your balance and how many credits were added. If you already logged in yourself that day, the run reports no reward, because the daily credit was already claimed.
+
 ## Features
 
-- 🤖 Automatic daily check-in
+- 🎁 Claims the 15,000 daily free credits automatically
 - 🔐 TOTP two-factor authentication support
 - 📊 Display account balance information
 - ⏰ Customizable execution time
-- 📝 Automatic execution log saving
+- 📨 Optional Telegram notification after every run
 
 ## Quick Start
 
