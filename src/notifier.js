@@ -1,11 +1,8 @@
 const core = require("@actions/core");
+const { validateOptionalSecret } = require("./helpers.js");
 
 const TELEGRAM_TIMEOUT_MS = 10000;
 const TELEGRAM_API_BASE = "https://api.telegram.org";
-
-function validateOptionalSecret(value) {
-	return value && value !== "null" && value.trim() !== "" ? value.trim() : null;
-}
 
 function readTelegramConfig() {
 	const token = validateOptionalSecret(
@@ -17,23 +14,31 @@ function readTelegramConfig() {
 	return { token, chatId };
 }
 
+// Telegram's HTML mode only requires escaping these three characters.
+function escapeHtml(value) {
+	return String(value)
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;");
+}
+
 function formatNotificationMessage(outcome) {
 	const timestamp = new Date().toISOString();
 
 	if (!outcome.success) {
 		return [
-			"❌ *1min.ai check-in failed*",
+			"❌ <b>1min.ai check-in failed</b>",
 			"",
-			`Error: ${outcome.error || "Unknown error"}`,
+			`Error: ${escapeHtml(outcome.error || "Unknown error")}`,
 			"",
-			`_${timestamp}_`,
+			`<i>${timestamp}</i>`,
 		].join("\n");
 	}
 
-	const lines = ["✅ *1min.ai check-in success*", ""];
+	const lines = ["✅ <b>1min.ai check-in success</b>", ""];
 
 	if (outcome.userName) {
-		lines.push(`User: ${outcome.userName}`);
+		lines.push(`User: ${escapeHtml(outcome.userName)}`);
 	}
 	if (typeof outcome.finalCredit === "number") {
 		lines.push(`Balance: ${outcome.finalCredit.toLocaleString()}`);
@@ -42,12 +47,14 @@ function formatNotificationMessage(outcome) {
 		lines.push(`Reward: +${outcome.creditDiff.toLocaleString()}`);
 	} else if (outcome.creditDiff === 0) {
 		lines.push("Reward: none (already checked in today)");
+	} else if (outcome.creditDiff === null) {
+		lines.push("Reward: unknown (could not read credits)");
 	}
 	if (typeof outcome.availablePercent === "string") {
 		lines.push(`Available: ${outcome.availablePercent}%`);
 	}
 
-	lines.push("", `_${timestamp}_`);
+	lines.push("", `<i>${timestamp}</i>`);
 	return lines.join("\n");
 }
 
@@ -63,7 +70,7 @@ async function sendTelegramNotification({ token, chatId, text }) {
 			body: JSON.stringify({
 				chat_id: chatId,
 				text,
-				parse_mode: "Markdown",
+				parse_mode: "HTML",
 				disable_web_page_preview: true,
 			}),
 			signal: controller.signal,
@@ -99,7 +106,7 @@ async function notify(outcome) {
 module.exports = {
 	notify,
 	readTelegramConfig,
+	escapeHtml,
 	formatNotificationMessage,
 	sendTelegramNotification,
-	validateOptionalSecret,
 };

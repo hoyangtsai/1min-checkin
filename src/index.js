@@ -1,46 +1,36 @@
 const core = require("@actions/core");
-const crypto = require("node:crypto");
 const OTPAuth = require("otpauth");
 const { notify } = require("./notifier.js");
+const {
+	validateOptionalSecret,
+	maskEmail,
+	generateDeviceId,
+	calculatePercent,
+} = require("./helpers.js");
 
 const REQUEST_TIMEOUT_MS = 10000;
 const CHECKIN_SETTLE_MS = 3000;
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 2000;
 const USER_AGENT =
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function isRetryableStatus(status) {
+	return status === 429 || status >= 500;
+}
+
 class OneMinAutoCheckin {
-	constructor() {
+	constructor(options = {}) {
 		this.email = core.getInput("email") || process.env.EMAIL;
 		this.password = core.getInput("password") || process.env.PASSWORD;
-		this.totpSecret = this.validateTotpSecret(
+		this.totpSecret = validateOptionalSecret(
 			core.getInput("totp_secret") || process.env.TOTP_SECRET,
 		);
-		this.deviceId = this.generateDeviceId();
-
-		if (!this.email || !this.password) {
-			const error = "Missing required parameters: email and password";
-			core.setFailed(error);
-			throw new Error(error);
-		}
-
-		const atIdx = this.email.indexOf("@");
-		const masked =
-			atIdx > 0
-				? `${this.email.substring(0, Math.min(3, atIdx))}***${this.email.substring(atIdx)}`
-				: "***";
-		core.info(`Account: ${masked}`);
-		core.info(`TOTP: ${this.totpSecret ? "Configured" : "Not configured"}`);
-	}
-
-	validateTotpSecret(secret) {
-		return secret && secret !== "null" && secret.trim() !== "" ? secret : null;
-	}
-
-	generateDeviceId() {
-		const randomHex = (length) =>
-			crypto.randomBytes(length).toString("hex").slice(0, length);
-
-		return `$device:${randomHex(16)}-${randomHex(15)}-${randomHex(8)}-${randomHex(6)}-${randomHex(16)}`;
+		this.deviceId = generateDeviceId();
+		this.settleMs = options.settleMs ?? CHECKIN_SETTLE_MS;
+		this.retryDelayMs = options.retryDelayMs ?? RETRY_BASE_DELAY_MS;
 	}
 
 	buildHeaders(authToken) {
@@ -61,13 +51,31 @@ class OneMinAutoCheckin {
 		const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
 		try {
-			const response = await fetch(url, {
-				...options,
-				signal: controller.signal,
-			});
-			return response;
+			return await fetch(url, { ...options, signal: controller.signal });
 		} finally {
 			clearTimeout(timeoutId);
+		}
+	}
+
+	// Retries network errors, timeouts, 429 and 5xx. Other statuses are returned as-is.
+	async fetchWithRetry(url, options = {}) {
+		for (let attempt = 1; ; attempt++) {
+			try {
+				const response = await this.fetchWithTimeout(url, options);
+				if (!isRetryableStatus(response.status) || attempt >= MAX_ATTEMPTS) {
+					return response;
+				}
+				core.warning(
+					`HTTP ${response.status} from ${url}, retrying (${attempt}/${MAX_ATTEMPTS - 1})`,
+				);
+			} catch (error) {
+				if (attempt >= MAX_ATTEMPTS) throw error;
+				const reason = error.name === "AbortError" ? "timeout" : error.message;
+				core.warning(
+					`Request to ${url} failed (${reason}), retrying (${attempt}/${MAX_ATTEMPTS - 1})`,
+				);
+			}
+			await sleep(this.retryDelayMs * attempt);
 		}
 	}
 
@@ -80,7 +88,7 @@ class OneMinAutoCheckin {
 		});
 
 		try {
-			const response = await this.fetchWithTimeout(
+			const response = await this.fetchWithRetry(
 				"https://api.1min.ai/auth/login",
 				{
 					method: "POST",
@@ -97,24 +105,22 @@ class OneMinAutoCheckin {
 					core.info("TOTP verification required");
 					if (this.totpSecret) {
 						return await this.performMFAVerification(data.user.token);
-					} else {
-						throw new Error("TOTP required but secret key not provided");
 					}
-				} else {
-					core.info("Login successful (no TOTP required)");
-					return await this.displayCreditInfo(data);
+					throw new Error("TOTP required but secret key not provided");
 				}
-			} else {
-				let errorMsg = "Login failed";
-				if (data.message) {
-					errorMsg = data.message;
-				} else if (response.status === 401) {
-					errorMsg = "Invalid email or password";
-				} else if (response.status === 429) {
-					errorMsg = "Too many requests, please try again later";
-				}
-				throw new Error(errorMsg);
+				core.info("Login successful (no TOTP required)");
+				return await this.displayCreditInfo(data);
 			}
+
+			let errorMsg = "Login failed";
+			if (data.message) {
+				errorMsg = data.message;
+			} else if (response.status === 401) {
+				errorMsg = "Invalid email or password";
+			} else if (response.status === 429) {
+				errorMsg = "Too many requests, please try again later";
+			}
+			throw new Error(errorMsg);
 		} catch (error) {
 			if (error.name === "AbortError") {
 				throw new Error("Login request timeout");
@@ -133,13 +139,12 @@ class OneMinAutoCheckin {
 			algorithm: "SHA1",
 		});
 
-		const totpCode = totp.generate();
-		core.info("Generated TOTP verification code");
-
+		// Not retried: a retry could reuse a code that has already expired or been consumed.
 		const body = JSON.stringify({
-			code: totpCode,
+			code: totp.generate(),
 			token: tempToken,
 		});
+		core.info("Generated TOTP verification code");
 
 		try {
 			const response = await this.fetchWithTimeout(
@@ -157,10 +162,8 @@ class OneMinAutoCheckin {
 			if (response.status === 200) {
 				core.info("TOTP verification successful!");
 				return await this.displayCreditInfo(data);
-			} else {
-				const errorMsg = data.message || `HTTP ${response.status}`;
-				throw new Error(errorMsg);
 			}
+			throw new Error(data.message || `HTTP ${response.status}`);
 		} catch (error) {
 			if (error.name === "AbortError") {
 				throw new Error("TOTP verification timeout");
@@ -179,54 +182,31 @@ class OneMinAutoCheckin {
 			}
 
 			const authToken = responseData.token || responseData.user?.token;
-			const userUuid = user.uuid;
+			const targetTeam =
+				user.teams.find(
+					(team) => team.team?.subscription?.userId === user.uuid,
+				) || user.teams[0];
 
-			let targetTeam = null;
-
-			for (const team of user.teams) {
-				const subscriptionUserId = team.team?.subscription?.userId;
-				if (subscriptionUserId === userUuid) {
-					targetTeam = team;
-					core.debug(
-						`Found matching team: ${team.teamId || team.team?.uuid} (subscription matches user)`,
-					);
-					break;
-				}
-			}
-
-			if (!targetTeam && user.teams.length > 0) {
-				targetTeam = user.teams[0];
-				core.debug(
-					`Using fallback team: ${targetTeam.teamId || targetTeam.team?.uuid} (first available)`,
-				);
-			}
-
-			if (!targetTeam) {
-				core.warning("Unable to find any team");
-				core.info("Login successful!");
-				return null;
-			}
-
-			const teamInfo = targetTeam;
-			const teamId = teamInfo.teamId || teamInfo.team?.uuid;
-			const userName = teamInfo.userName || user.email?.split("@")[0] || "User";
-			const usedCredit = teamInfo.usedCredit || 0;
-			const initialCredit = teamInfo.team?.credit || 0;
+			const teamId = targetTeam.teamId || targetTeam.team?.uuid;
+			const userName =
+				targetTeam.userName || user.email?.split("@")[0] || "User";
+			const usedCredit = targetTeam.usedCredit || 0;
+			const initialCredit = targetTeam.team?.credit || 0;
 
 			core.info(`User: ${userName}`);
 			core.debug(`Team ID: ${teamId}`);
 			core.info(`Initial Credit: ${initialCredit.toLocaleString()}`);
 
 			if (!teamId || !authToken) {
-				const percent = this.calculatePercent(initialCredit, usedCredit);
+				const percent = calculatePercent(initialCredit, usedCredit);
 				core.info(
 					`${userName} login successful | Balance: ${initialCredit.toLocaleString()} (${percent}%)`,
 				);
 				return {
 					userName,
 					finalCredit: initialCredit,
-					creditDiff: 0,
-					availablePercent: String(percent),
+					creditDiff: null,
+					availablePercent: percent,
 				};
 			}
 
@@ -252,29 +232,44 @@ class OneMinAutoCheckin {
 		initialCredit = 0,
 	) {
 		core.debug(`Starting credit check process (Team ID: ${teamId})`);
-		core.debug("Auth token: [present]");
 
 		const headers = this.buildHeaders(authToken);
 
-		// Get current credit (or use provided initial credit)
 		const currentCredit =
 			initialCredit > 0
 				? initialCredit
 				: await this.getCredits(teamId, headers);
-		core.info(`Current credits: ${currentCredit.toLocaleString()}`);
+		if (currentCredit !== null) {
+			core.info(`Current credits: ${currentCredit.toLocaleString()}`);
+		}
 
-		// Check unread notifications to trigger check-in
+		// Hitting the unread-notifications endpoint is what triggers the daily reward.
 		await this.checkUnreadNotifications(headers);
 
-		// Wait for check-in reward to settle before re-checking credits
-		await new Promise((resolve) => setTimeout(resolve, CHECKIN_SETTLE_MS));
+		await sleep(this.settleMs);
 		const finalCredit = await this.getCredits(teamId, headers);
+
+		if (finalCredit === null) {
+			core.warning("Unable to read final credits; reward unknown");
+			return {
+				userName,
+				finalCredit: currentCredit,
+				creditDiff: null,
+				availablePercent:
+					currentCredit === null
+						? undefined
+						: calculatePercent(currentCredit, usedCredit),
+			};
+		}
 		core.info(`Final credits: ${finalCredit.toLocaleString()}`);
 
-		const creditDiff = finalCredit - currentCredit;
+		const creditDiff =
+			currentCredit === null ? null : finalCredit - currentCredit;
 		let message = `${userName} | Balance: ${finalCredit.toLocaleString()}`;
 
-		if (creditDiff > 0) {
+		if (creditDiff === null) {
+			core.warning("Unable to read starting credits; reward unknown");
+		} else if (creditDiff > 0) {
 			core.info(
 				`Check-in reward received: +${creditDiff.toLocaleString()} credits`,
 			);
@@ -285,35 +280,32 @@ class OneMinAutoCheckin {
 			core.warning(`Credits decreased: ${creditDiff.toLocaleString()}`);
 		}
 
-		const totalCredit = finalCredit + usedCredit;
-		const availablePercent =
-			totalCredit > 0 ? ((finalCredit / totalCredit) * 100).toFixed(1) : "0";
+		const availablePercent = calculatePercent(finalCredit, usedCredit);
 		message += ` (${availablePercent}%)`;
-
 		core.info(message);
 
 		return { userName, finalCredit, creditDiff, availablePercent };
 	}
 
+	// Returns null when the balance could not be read, so callers never mistake a failure for 0.
 	async getCredits(teamId, headers) {
 		const creditUrl = `https://api.1min.ai/teams/${teamId}/credits`;
 		core.debug(`Requesting credit URL: ${creditUrl}`);
 
 		try {
-			const response = await this.fetchWithTimeout(creditUrl, { headers });
+			const response = await this.fetchWithRetry(creditUrl, { headers });
 			core.debug(`Credit API status: ${response.status}`);
 
-			if (response.status === 200) {
-				const creditData = await response.json();
-				return creditData.credit || 0;
-			} else {
+			if (response.status !== 200) {
 				core.warning(`Credit API failed - Status: ${response.status}`);
-				return 0;
+				return null;
 			}
+			const creditData = await response.json();
+			return typeof creditData.credit === "number" ? creditData.credit : null;
 		} catch (error) {
 			const reason = error.name === "AbortError" ? "timeout" : error.message;
 			core.warning(`Credit API error: ${reason}`);
-			return 0;
+			return null;
 		}
 	}
 
@@ -322,7 +314,7 @@ class OneMinAutoCheckin {
 		core.debug(`Checking unread notifications: ${notificationUrl}`);
 
 		try {
-			const response = await this.fetchWithTimeout(notificationUrl, {
+			const response = await this.fetchWithRetry(notificationUrl, {
 				headers,
 			});
 			core.debug(`Notification API status: ${response.status}`);
@@ -339,16 +331,16 @@ class OneMinAutoCheckin {
 		}
 	}
 
-	calculatePercent(remainingCredit, usedCredit) {
-		const total = remainingCredit + usedCredit;
-		return total > 0 ? ((remainingCredit / total) * 100).toFixed(1) : 0;
-	}
-
 	async run() {
-		let outcome;
 		try {
 			core.info("1min.ai auto checkin started");
 			core.info(`Execution time: ${new Date().toISOString()}`);
+
+			if (!this.email || !this.password) {
+				throw new Error("Missing required parameters: email and password");
+			}
+			core.info(`Account: ${maskEmail(this.email)}`);
+			core.info(`TOTP: ${this.totpSecret ? "Configured" : "Not configured"}`);
 
 			const loginResult = await this.login();
 
@@ -356,14 +348,13 @@ class OneMinAutoCheckin {
 			core.setOutput("success", "true");
 			core.setOutput("message", "Checkin successful");
 
-			outcome = {
+			await notify({
 				success: true,
 				userName: loginResult?.userName,
 				finalCredit: loginResult?.finalCredit,
 				creditDiff: loginResult?.creditDiff,
 				availablePercent: loginResult?.availablePercent,
-			};
-			await notify(outcome);
+			});
 			return true;
 		} catch (error) {
 			core.error(`Checkin process failed: ${error.message}`);
@@ -371,21 +362,20 @@ class OneMinAutoCheckin {
 			core.setOutput("success", "false");
 			core.setOutput("message", error.message);
 
-			outcome = { success: false, error: error.message };
 			try {
-				await notify(outcome);
+				await notify({ success: false, error: error.message });
 			} catch (notifyError) {
 				core.warning(`Notify error: ${notifyError.message}`);
 			}
-			process.exit(1);
+			return false;
 		}
 	}
 }
 
-// Execute checkin
 if (require.main === module) {
-	const checkin = new OneMinAutoCheckin();
-	checkin.run();
+	new OneMinAutoCheckin().run().then((ok) => {
+		if (!ok) process.exitCode = 1;
+	});
 }
 
 module.exports = OneMinAutoCheckin;

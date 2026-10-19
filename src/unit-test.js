@@ -1,163 +1,196 @@
-// Unit tests for core functionality
-const crypto = require("node:crypto");
+// Offline unit tests. Run: npm run unit-test
+// Single test: node --test --test-name-pattern="<name>" src/unit-test.js
+const { describe, it, beforeEach, afterEach } = require("node:test");
+const assert = require("node:assert/strict");
 const OTPAuth = require("otpauth");
-
-let passed = 0;
-let failed = 0;
-
-function assert(name, condition) {
-	if (condition) {
-		console.log(`  PASS: ${name}`);
-		passed++;
-	} else {
-		console.log(`  FAIL: ${name}`);
-		failed++;
-	}
-}
-
-console.log("Running unit tests...\n");
-
-// Test 1: TOTP generation
-console.log("TOTP functionality:");
-try {
-	const totp = new OTPAuth.TOTP({
-		secret: "JBSWY3DPEHPK3PXP",
-		digits: 6,
-		period: 30,
-		algorithm: "SHA1",
-	});
-	const code = totp.generate();
-	assert("generates 6-digit code", /^\d{6}$/.test(code));
-} catch (_error) {
-	assert("TOTP generation", false);
-}
-
-// Test 2: Device ID generation (crypto-based)
-console.log("\nDevice ID generation:");
-try {
-	const randomHex = (length) =>
-		crypto.randomBytes(length).toString("hex").slice(0, length);
-	const deviceId = `$device:${randomHex(16)}-${randomHex(15)}-${randomHex(8)}-${randomHex(6)}-${randomHex(16)}`;
-
-	assert("starts with $device:", deviceId.startsWith("$device:"));
-	assert(
-		"has 5 parts separated by dashes",
-		deviceId.replace("$device:", "").split("-").length === 5,
-	);
-	assert("contains only hex chars", /^\$device:[0-9a-f-]+$/.test(deviceId));
-
-	const deviceId2 = `$device:${randomHex(16)}-${randomHex(15)}-${randomHex(8)}-${randomHex(6)}-${randomHex(16)}`;
-	assert("generates unique IDs", deviceId !== deviceId2);
-} catch (_error) {
-	assert("device ID generation", false);
-}
-
-// Test 3: TOTP secret validation
-console.log("\nTOTP secret validation:");
-function validateTotpSecret(secret) {
-	return secret && secret !== "null" && secret.trim() !== "" ? secret : null;
-}
-
-assert(
-	"valid secret returns secret",
-	validateTotpSecret("JBSWY3DPEHPK3PXP") === "JBSWY3DPEHPK3PXP",
-);
-assert("empty string returns null", validateTotpSecret("") === null);
-assert('"null" string returns null', validateTotpSecret("null") === null);
-assert("whitespace returns null", validateTotpSecret("  ") === null);
-assert("undefined returns null", validateTotpSecret(undefined) === null);
-assert("null returns null", validateTotpSecret(null) === null);
-
-// Test 4: Percentage calculation
-console.log("\nPercentage calculation:");
-function calculatePercent(remainingCredit, usedCredit) {
-	const total = remainingCredit + usedCredit;
-	return total > 0 ? ((remainingCredit / total) * 100).toFixed(1) : 0;
-}
-
-assert("50/100 = 50.0%", calculatePercent(50, 50) === "50.0");
-assert("0/0 = 0", calculatePercent(0, 0) === 0);
-assert("75/100 = 75.0%", calculatePercent(75, 25) === "75.0");
-assert("100/0 = 100.0%", calculatePercent(100, 0) === "100.0");
-assert("0/100 = 0.0%", calculatePercent(0, 100) === "0.0");
-
-// Test 5: Email masking edge cases
-console.log("\nEmail masking:");
-function maskEmail(email) {
-	const atIdx = email.indexOf("@");
-	return atIdx > 0
-		? `${email.substring(0, Math.min(3, atIdx))}***${email.substring(atIdx)}`
-		: "***";
-}
-
-assert(
-	"normal email masked",
-	maskEmail("test@example.com") === "tes***@example.com",
-);
-assert(
-	"short local part masked",
-	maskEmail("ab@example.com") === "ab***@example.com",
-);
-assert(
-	"single char local part",
-	maskEmail("a@example.com") === "a***@example.com",
-);
-assert("no @ returns ***", maskEmail("noemail") === "***");
-
-// Test 6: Telegram notifier — secret validation + message formatting
-console.log("\nTelegram notifier:");
 const {
 	validateOptionalSecret,
-	formatNotificationMessage,
-} = require("./notifier.js");
+	maskEmail,
+	generateDeviceId,
+	calculatePercent,
+} = require("./helpers.js");
+const { escapeHtml, formatNotificationMessage } = require("./notifier.js");
+const OneMinAutoCheckin = require("./index.js");
 
-assert(
-	"valid secret returns trimmed value",
-	validateOptionalSecret("  123:abc  ") === "123:abc",
-);
-assert("empty string returns null", validateOptionalSecret("") === null);
-assert('"null" string returns null', validateOptionalSecret("null") === null);
-assert("whitespace returns null", validateOptionalSecret("   ") === null);
-assert("undefined returns null", validateOptionalSecret(undefined) === null);
-assert("null returns null", validateOptionalSecret(null) === null);
+const ENV_KEYS = [
+	"EMAIL",
+	"PASSWORD",
+	"TOTP_SECRET",
+	"TELEGRAM_BOT_TOKEN",
+	"TELEGRAM_CHAT_ID",
+];
 
-const successMsg = formatNotificationMessage({
-	success: true,
-	userName: "alice",
-	finalCredit: 1500,
-	creditDiff: 100,
-	availablePercent: "75.0",
-});
-assert("success message has success marker", successMsg.includes("✅"));
-assert("success message has user", successMsg.includes("User: alice"));
-assert("success message has balance", successMsg.includes("Balance: 1,500"));
-assert("success message has reward", successMsg.includes("Reward: +100"));
-assert("success message has percent", successMsg.includes("Available: 75.0%"));
-
-const noRewardMsg = formatNotificationMessage({
-	success: true,
-	userName: "bob",
-	finalCredit: 500,
-	creditDiff: 0,
-	availablePercent: "50.0",
-});
-assert(
-	"no-reward message notes already checked in",
-	noRewardMsg.includes("Reward: none"),
-);
-
-const failMsg = formatNotificationMessage({
-	success: false,
-	error: "Invalid email or password",
-});
-assert("failure message has failure marker", failMsg.includes("❌"));
-assert(
-	"failure message includes error",
-	failMsg.includes("Invalid email or password"),
-);
-
-// Summary
-console.log(`\nResults: ${passed} passed, ${failed} failed`);
-if (failed > 0) {
-	process.exit(1);
+function jsonResponse(status, body) {
+	return new Response(JSON.stringify(body), { status });
 }
+
+// Routes fetch calls by URL substring and records every call.
+function mockFetch(routes) {
+	const calls = [];
+	globalThis.fetch = async (url, options = {}) => {
+		calls.push({ url, options });
+		for (const [pattern, handler] of Object.entries(routes)) {
+			if (url.includes(pattern)) return handler(calls);
+		}
+		throw new Error(`Unmocked URL: ${url}`);
+	};
+	return calls;
+}
+
+let savedEnv;
+let savedFetch;
+beforeEach(() => {
+	savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+	for (const k of ENV_KEYS) delete process.env[k];
+	savedFetch = globalThis.fetch;
+});
+afterEach(() => {
+	for (const k of ENV_KEYS) {
+		if (savedEnv[k] === undefined) delete process.env[k];
+		else process.env[k] = savedEnv[k];
+	}
+	globalThis.fetch = savedFetch;
+	// core.setFailed sets this; reset so expected failures don't fail the run.
+	process.exitCode = 0;
+});
+
+describe("helpers", () => {
+	it("generates a 6-digit TOTP code", () => {
+		const totp = new OTPAuth.TOTP({ secret: "JBSWY3DPEHPK3PXP" });
+		assert.match(totp.generate(), /^\d{6}$/);
+	});
+
+	it("generates unique hex device ids", () => {
+		const id = generateDeviceId();
+		assert.match(id, /^\$device:[0-9a-f]+(-[0-9a-f]+){4}$/);
+		assert.notEqual(id, generateDeviceId());
+	});
+
+	it("validateOptionalSecret treats blank and 'null' as unset", () => {
+		assert.equal(validateOptionalSecret("  123:abc  "), "123:abc");
+		for (const v of ["", "null", "   ", undefined, null]) {
+			assert.equal(validateOptionalSecret(v), null);
+		}
+	});
+
+	it("calculatePercent always returns a string", () => {
+		assert.equal(calculatePercent(50, 50), "50.0");
+		assert.equal(calculatePercent(0, 0), "0.0");
+		assert.equal(calculatePercent(100, 0), "100.0");
+		assert.equal(calculatePercent(0, 100), "0.0");
+	});
+
+	it("maskEmail hides the local part", () => {
+		assert.equal(maskEmail("test@example.com"), "tes***@example.com");
+		assert.equal(maskEmail("ab@example.com"), "ab***@example.com");
+		assert.equal(maskEmail("noemail"), "***");
+	});
+});
+
+describe("notifier", () => {
+	it("escapes HTML special characters", () => {
+		assert.equal(escapeHtml("a<b>&c"), "a&lt;b&gt;&amp;c");
+	});
+
+	it("formats a success message", () => {
+		const msg = formatNotificationMessage({
+			success: true,
+			userName: "alice_smith",
+			finalCredit: 1500,
+			creditDiff: 100,
+			availablePercent: "75.0",
+		});
+		assert.ok(msg.includes("✅"));
+		assert.ok(msg.includes("User: alice_smith"));
+		assert.ok(msg.includes("Balance: 1,500"));
+		assert.ok(msg.includes("Reward: +100"));
+		assert.ok(msg.includes("Available: 75.0%"));
+	});
+
+	it("distinguishes no reward from unknown reward", () => {
+		const base = { success: true, finalCredit: 500 };
+		assert.ok(
+			formatNotificationMessage({ ...base, creditDiff: 0 }).includes(
+				"Reward: none",
+			),
+		);
+		assert.ok(
+			formatNotificationMessage({ ...base, creditDiff: null }).includes(
+				"Reward: unknown",
+			),
+		);
+	});
+
+	it("escapes the error in a failure message", () => {
+		const msg = formatNotificationMessage({
+			success: false,
+			error: "bad <token>",
+		});
+		assert.ok(msg.includes("❌"));
+		assert.ok(msg.includes("bad &lt;token&gt;"));
+	});
+});
+
+describe("check-in", () => {
+	const opts = { settleMs: 0, retryDelayMs: 0 };
+
+	it("reports unknown reward instead of a fake one when credit reads fail", async () => {
+		mockFetch({
+			"/notifications/unread": () => jsonResponse(200, { count: 0 }),
+			"/credits": () => jsonResponse(500, {}),
+		});
+		const checkin = new OneMinAutoCheckin(opts);
+		const result = await checkin.fetchLatestCredit("t1", "tok", "u", 0, 0);
+		assert.equal(result.creditDiff, null);
+		assert.equal(result.finalCredit, null);
+	});
+
+	it("computes the reward when both credit reads succeed", async () => {
+		mockFetch({
+			"/notifications/unread": () => jsonResponse(200, { count: 1 }),
+			"/credits": () => jsonResponse(200, { credit: 1100 }),
+		});
+		const checkin = new OneMinAutoCheckin(opts);
+		const result = await checkin.fetchLatestCredit("t1", "tok", "u", 0, 1000);
+		assert.equal(result.creditDiff, 100);
+		assert.equal(result.availablePercent, "100.0");
+	});
+
+	it("retries 5xx responses and then succeeds", async () => {
+		let attempts = 0;
+		mockFetch({
+			"/credits": () =>
+				++attempts < 3
+					? jsonResponse(503, {})
+					: jsonResponse(200, { credit: 42 }),
+		});
+		const checkin = new OneMinAutoCheckin(opts);
+		assert.equal(await checkin.getCredits("t1", {}), 42);
+		assert.equal(attempts, 3);
+	});
+
+	it("does not retry 401 on login", async () => {
+		process.env.EMAIL = "a@b.com";
+		process.env.PASSWORD = "x";
+		const calls = mockFetch({
+			"/auth/login": () => jsonResponse(401, {}),
+		});
+		const checkin = new OneMinAutoCheckin(opts);
+		await assert.rejects(checkin.login(), /Invalid email or password/);
+		assert.equal(calls.length, 1);
+	});
+
+	it("sends a failure notification when credentials are missing", async () => {
+		process.env.TELEGRAM_BOT_TOKEN = "123:abc";
+		process.env.TELEGRAM_CHAT_ID = "42";
+		const calls = mockFetch({
+			"api.telegram.org": () => jsonResponse(200, { ok: true }),
+		});
+		const ok = await new OneMinAutoCheckin(opts).run();
+		assert.equal(ok, false);
+		assert.equal(calls.length, 1);
+		const body = JSON.parse(calls[0].options.body);
+		assert.equal(body.parse_mode, "HTML");
+		assert.ok(body.text.includes("Missing required parameters"));
+	});
+});

@@ -23,12 +23,6 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    - name: Lint
-      run: npm run lint
-
-    - name: Unit tests
-      run: npm run unit-test
-
     - name: Build project
       run: npm run build
 
@@ -41,11 +35,3 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: node dist/index.js
 
-    - name: Upload execution logs
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: checkin-logs-${{ github.run_number }}
-        path: |
-          *.log
-        retention-days: 7

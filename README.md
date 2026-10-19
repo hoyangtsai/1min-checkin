@@ -29,7 +29,7 @@ In your GitHub project, go to `Settings` > `Secrets and variables` > `Actions`, 
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token (from [@BotFather](https://t.me/BotFather)) — required for Telegram notifications
 - `TELEGRAM_CHAT_ID`: Telegram chat ID to receive notifications
 
-If both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set, the workflow sends a Markdown-formatted message to that chat after every run — success (with balance + reward) or failure (with error). If either is missing, notifications are skipped silently.
+If both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set, the workflow sends an HTML-formatted message to that chat after every run — success (with balance + reward) or failure (with error). If either is missing, notifications are skipped silently.
 
 ### 3. Enable GitHub Actions
 
@@ -71,18 +71,26 @@ export EMAIL="your-email@example.com"
 export PASSWORD="your-password"
 export TOTP_SECRET="your-totp-secret"  # Optional
 
-# Run test
+# Run a live check-in
 npm start
+```
+
+Offline unit tests (no credentials or network needed):
+
+```bash
+npm run unit-test
 ```
 
 ## Project Structure
 
 ```
 ├── .github/workflows/
+│   ├── ci.yml               # Lint, unit tests, build on push/PR
 │   ├── daily-checkin.yml    # Daily check-in workflow (cron + manual)
 │   └── release.yml          # GitHub release on tag push
 ├── src/
 │   ├── index.js             # Main check-in logic (OneMinAutoCheckin class)
+│   ├── helpers.js           # Pure helpers shared by code and tests
 │   ├── notifier.js          # Telegram notification sender
 │   ├── test.js              # Local live runner
 │   └── unit-test.js         # Offline unit tests
@@ -100,6 +108,7 @@ npm start
 
 - Ensure your GitHub account has sufficient Actions usage quota
 - Regularly check execution results
+- GitHub automatically disables scheduled workflows in public repositories after 60 days without repository activity. If check-ins silently stop, re-enable the workflow on the Actions page or push a commit.
 - If consecutive failures occur, check if account credentials are correct
 - TOTP secret key is only needed when two-factor authentication is enabled
 
@@ -124,6 +133,7 @@ npm start
 3. **GitHub Action Not Executing**
    - Check if the cron expression is correct
    - Confirm GitHub Actions is enabled
+   - Check whether GitHub disabled the schedule after 60 days of inactivity
 
 ### View Execution Logs
 

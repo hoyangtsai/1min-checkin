@@ -1,6 +1,6 @@
 name: '1min.ai Auto Checkin'
 description: '1min.ai Auto Checkin GitHub Action'
-author: 'Your Name'
+author: 'Zac'
 
 inputs:
   email:
