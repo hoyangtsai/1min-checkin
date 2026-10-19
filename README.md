@@ -108,7 +108,7 @@ npm run unit-test
 
 - Ensure your GitHub account has sufficient Actions usage quota
 - Regularly check execution results
-- GitHub automatically disables scheduled workflows in public repositories after 60 days without repository activity. If check-ins silently stop, re-enable the workflow on the Actions page or push a commit.
+- GitHub automatically disables scheduled workflows in public repositories after 60 days without repository activity. The daily workflow includes a keepalive step that re-enables itself through the GitHub API on every run to prevent this. If check-ins still stop, re-enable the workflow on the Actions page.
 - If consecutive failures occur, check if account credentials are correct
 - TOTP secret key is only needed when two-factor authentication is enabled
 
