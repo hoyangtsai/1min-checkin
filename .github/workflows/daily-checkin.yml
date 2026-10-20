@@ -2,7 +2,7 @@ name: 1min.ai Daily Auto Checkin
 
 on:
   schedule:
-    # Run daily at UTC 8:00 (Taipei time 16:00)
+    # Run daily at UTC 8:05 (Taipei time 16:05); off the hour to dodge top-of-hour queue congestion
     - cron: '5 8 * * *'
   workflow_dispatch: # Allow manual trigger
 
