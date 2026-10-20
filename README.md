@@ -1,5 +1,7 @@
 # 1min.ai Auto Checkin GitHub Action
 
+[![1min.ai Daily Auto Checkin](https://github.com/7a6163/1min-checkin/actions/workflows/daily-checkin.yml/badge.svg)](https://github.com/7a6163/1min-checkin/actions/workflows/daily-checkin.yml)
+
 This is a GitHub Action for automatic daily check-in to 1min.ai, supporting email/password login and TOTP two-factor authentication.
 
 1min.ai gives every account **15,000 free credits per day** the first time it logs in (shown as `DAILY_FREE_CREDIT` in your credit history). This Action exists to claim that reward automatically: it logs in once a day, then reports your balance and how many credits were added. If you already logged in yourself that day, the run reports no reward, because the daily credit was already claimed.

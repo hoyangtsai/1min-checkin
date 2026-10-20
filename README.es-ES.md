@@ -1,5 +1,7 @@
 # 1min.ai Auto Checkin GitHub Action
 
+[![1min.ai Daily Auto Checkin](https://github.com/7a6163/1min-checkin/actions/workflows/daily-checkin.yml/badge.svg)](https://github.com/7a6163/1min-checkin/actions/workflows/daily-checkin.yml)
+
 Esta es una GitHub Action para el check-in diario automático en 1min.ai, compatible con inicio de sesión por correo electrónico/contraseña y autenticación de dos factores TOTP.
 
 1min.ai otorga a cada cuenta **15,000 créditos gratuitos al día** la primera vez que inicia sesión (aparecen como `DAILY_FREE_CREDIT` en el historial de créditos). Esta Action existe para reclamar esa recompensa automáticamente: inicia sesión una vez al día y luego informa tu saldo y cuántos créditos se añadieron. Si ya iniciaste sesión tú mismo ese día, la ejecución no mostrará recompensa, porque el crédito diario ya fue reclamado.
