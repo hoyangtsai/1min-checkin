@@ -18,6 +18,9 @@ inputs:
   telegram_chat_id:
     description: 'Telegram chat ID for notifications (optional)'
     required: false
+  telegram_topic_id:
+    description: 'Telegram forum topic (message thread) ID to post into (optional)'
+    required: false
 
 runs:
   using: 'node24'

@@ -32,6 +32,7 @@ En tu proyecto de GitHub, ve a `Settings` > `Secrets and variables` > `Actions`,
 - `TOTP_SECRET`: Tu clave secreta TOTP (solo necesaria si la autenticación de dos factores está habilitada)
 - `TELEGRAM_BOT_TOKEN`: Token del bot de Telegram (obtenido a través de [@BotFather](https://t.me/BotFather)) — requerido para notificaciones de Telegram
 - `TELEGRAM_CHAT_ID`: ID del chat de Telegram para recibir notificaciones
+- `TELEGRAM_TOPIC_ID`: ID del tema (topic) del foro, para publicar en un tema específico de un grupo con Temas activados. Déjalo sin configurar para publicar en el tema General. El ID es el número del medio en el enlace de un mensaje del tema (`https://t.me/c/<chat>/<topic>/<message>`)
 
 Si tanto `TELEGRAM_BOT_TOKEN` como `TELEGRAM_CHAT_ID` están configurados, el flujo de trabajo enviará un mensaje formateado en Markdown a ese chat después de cada ejecución: éxito (con saldo + recompensa) o fallo (con error). Si falta alguno de los dos, las notificaciones se omitirán silenciosamente.
 

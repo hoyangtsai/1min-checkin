@@ -11,7 +11,21 @@ function readTelegramConfig() {
 	const chatId = validateOptionalSecret(
 		core.getInput("telegram_chat_id") || process.env.TELEGRAM_CHAT_ID,
 	);
-	return { token, chatId };
+	const topicId = validateOptionalSecret(
+		core.getInput("telegram_topic_id") || process.env.TELEGRAM_TOPIC_ID,
+	);
+	return { token, chatId, topicId: parseTopicId(topicId) };
+}
+
+// Forum topic (message_thread_id) is a positive integer; ignore anything else
+// so a typo still delivers to the chat's general thread instead of failing.
+function parseTopicId(value) {
+	if (value === null) return null;
+	if (/^\d+$/.test(value) && Number(value) > 0) return Number(value);
+	core.warning(
+		`Telegram topic ID "${value}" is not a positive integer; ignored`,
+	);
+	return null;
 }
 
 // Telegram's HTML mode only requires escaping these three characters.
@@ -58,7 +72,7 @@ function formatNotificationMessage(outcome) {
 	return lines.join("\n");
 }
 
-async function sendTelegramNotification({ token, chatId, text }) {
+async function sendTelegramNotification({ token, chatId, topicId, text }) {
 	const url = `${TELEGRAM_API_BASE}/bot${token}/sendMessage`;
 	const controller = new AbortController();
 	const timeoutId = setTimeout(() => controller.abort(), TELEGRAM_TIMEOUT_MS);
@@ -69,6 +83,7 @@ async function sendTelegramNotification({ token, chatId, text }) {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				chat_id: chatId,
+				...(topicId && { message_thread_id: topicId }),
 				text,
 				parse_mode: "HTML",
 				disable_web_page_preview: true,
@@ -93,14 +108,14 @@ async function sendTelegramNotification({ token, chatId, text }) {
 }
 
 async function notify(outcome) {
-	const { token, chatId } = readTelegramConfig();
+	const { token, chatId, topicId } = readTelegramConfig();
 	if (!token || !chatId) {
 		core.debug("Telegram notify: skipped (secrets not configured)");
 		return { ok: false, skipped: true };
 	}
 
 	const text = formatNotificationMessage(outcome);
-	return await sendTelegramNotification({ token, chatId, text });
+	return await sendTelegramNotification({ token, chatId, topicId, text });
 }
 
 module.exports = {

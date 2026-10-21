@@ -18,6 +18,7 @@ const ENV_KEYS = [
 	"TOTP_SECRET",
 	"TELEGRAM_BOT_TOKEN",
 	"TELEGRAM_CHAT_ID",
+	"TELEGRAM_TOPIC_ID",
 ];
 
 function jsonResponse(status, body) {
@@ -192,5 +193,32 @@ describe("check-in", () => {
 		const body = JSON.parse(calls[0].options.body);
 		assert.equal(body.parse_mode, "HTML");
 		assert.ok(body.text.includes("Missing required parameters"));
+		assert.equal(body.message_thread_id, undefined);
+	});
+
+	it("posts into the configured Telegram topic", async () => {
+		process.env.TELEGRAM_BOT_TOKEN = "123:abc";
+		process.env.TELEGRAM_CHAT_ID = "-10042";
+		process.env.TELEGRAM_TOPIC_ID = "7";
+		const calls = mockFetch({
+			"api.telegram.org": () => jsonResponse(200, { ok: true }),
+		});
+		await new OneMinAutoCheckin(opts).run();
+		assert.equal(JSON.parse(calls[0].options.body).message_thread_id, 7);
+	});
+
+	it("ignores an invalid Telegram topic ID", async () => {
+		process.env.TELEGRAM_BOT_TOKEN = "123:abc";
+		process.env.TELEGRAM_CHAT_ID = "-10042";
+		process.env.TELEGRAM_TOPIC_ID = "general";
+		const calls = mockFetch({
+			"api.telegram.org": () => jsonResponse(200, { ok: true }),
+		});
+		await new OneMinAutoCheckin(opts).run();
+		assert.equal(calls.length, 1);
+		assert.equal(
+			JSON.parse(calls[0].options.body).message_thread_id,
+			undefined,
+		);
 	});
 });

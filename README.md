@@ -32,6 +32,7 @@ In your GitHub project, go to `Settings` > `Secrets and variables` > `Actions`, 
 - `TOTP_SECRET`: Your TOTP secret key (only needed if two-factor authentication is enabled)
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token (from [@BotFather](https://t.me/BotFather)) — required for Telegram notifications
 - `TELEGRAM_CHAT_ID`: Telegram chat ID to receive notifications
+- `TELEGRAM_TOPIC_ID`: Forum topic ID, to post into a specific topic of a group with Topics enabled. Leave unset to post to the chat's General topic. The ID is the middle number in a topic message link (`https://t.me/c/<chat>/<topic>/<message>`)
 
 If both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set, the workflow sends an HTML-formatted message to that chat after every run — success (with balance + reward) or failure (with error). If either is missing, notifications are skipped silently.
 
