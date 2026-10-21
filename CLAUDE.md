@@ -42,7 +42,7 @@ All HTTP goes through `fetchWithTimeout()` (10s abort), and everything except TO
 
 ## Build and release
 
-`dist/` is gitignored. `ci.yml` runs `npm run ci` on push to main and on PRs. `daily-checkin.yml` only installs, builds, and runs `node dist/index.js`, so lint or test failures never block a day's check-in. `release.yml` runs lint, tests, and build before creating the release. Consumers who reference this repo as an Action via `action.yml` need a built `dist/index.js`, so a release tag (`v*`) must be cut from a state where the build succeeds.
+`dist/` is gitignored. `ci.yml` runs `npm run ci` on push to main and on PRs. `daily-checkin.yml` only installs, builds, and runs `node dist/index.js`, so lint or test failures never block a day's check-in. `release.yml` runs on a `v*` tag push: lint, tests, build, then commits `dist/` onto a detached release commit and force-moves both the version tag and the floating major tag (e.g. `v1`) onto it, so `uses: 7a6163/1min-checkin@v1` gets a built `dist/index.js`. `main` never contains `dist/`. Bump `package.json` with `npm version <x.y.z> --no-git-tag-version` before tagging.
 
 ## Style
 
