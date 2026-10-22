@@ -9,7 +9,11 @@ const {
 } = require("./helpers.js");
 
 const REQUEST_TIMEOUT_MS = 10000;
-const CHECKIN_SETTLE_MS = 3000;
+// The reward shows up in the credit history a few seconds after the request
+// that triggers it, so poll the history for up to ~30 seconds.
+const TOPUP_POLL_INTERVAL_MS = 5000;
+const TOPUP_POLL_ATTEMPTS = 6;
+const DAILY_TOPUP_TYPE = "DAILY_FREE_CREDIT";
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 2000;
 const USER_AGENT =
@@ -29,7 +33,10 @@ class OneMinAutoCheckin {
 			core.getInput("totp_secret") || process.env.TOTP_SECRET,
 		);
 		this.deviceId = generateDeviceId();
-		this.settleMs = options.settleMs ?? CHECKIN_SETTLE_MS;
+		this.pollIntervalMs = options.pollIntervalMs ?? TOPUP_POLL_INTERVAL_MS;
+		this.pollAttempts = options.pollAttempts ?? TOPUP_POLL_ATTEMPTS;
+		// A daily topup created after this moment was claimed by this run.
+		this.startedAt = Date.now();
 		this.retryDelayMs = options.retryDelayMs ?? RETRY_BASE_DELAY_MS;
 	}
 
@@ -224,6 +231,31 @@ class OneMinAutoCheckin {
 		}
 	}
 
+	// Waits for a DAILY_FREE_CREDIT topup created during this run. Resolves to
+	// { claimed, credit, createdAt } for the newest daily topup seen, or null if
+	// the credit history could never be read.
+	async pollDailyTopup(teamId, headers) {
+		let readOnce = false;
+		let latest;
+		for (let attempt = 1; attempt <= this.pollAttempts; attempt++) {
+			await sleep(this.pollIntervalMs);
+			const topups = await this.getTopups(teamId, headers);
+			if (topups === null) continue;
+			readOnce = true;
+			latest = topups.find((topup) => topup.type === DAILY_TOPUP_TYPE);
+			if (latest && Date.parse(latest.createdAt) >= this.startedAt) {
+				return {
+					claimed: true,
+					credit: latest.credit,
+					createdAt: latest.createdAt,
+				};
+			}
+			core.info(`Daily reward not seen yet (${attempt}/${this.pollAttempts})`);
+		}
+		if (!readOnce) return null;
+		return { claimed: false, createdAt: latest?.createdAt ?? null };
+	}
+
 	async fetchLatestCredit(
 		teamId,
 		authToken,
@@ -246,45 +278,62 @@ class OneMinAutoCheckin {
 		// Hitting the unread-notifications endpoint is what triggers the daily reward.
 		await this.checkUnreadNotifications(headers);
 
-		await sleep(this.settleMs);
-		const finalCredit = await this.getCredits(teamId, headers);
+		const daily = await this.pollDailyTopup(teamId, headers);
+		const finalCredit =
+			(await this.getCredits(teamId, headers)) ?? currentCredit;
 
-		if (finalCredit === null) {
-			core.warning("Unable to read final credits; reward unknown");
-			return {
-				userName,
-				finalCredit: currentCredit,
-				creditDiff: null,
-				availablePercent:
-					currentCredit === null
-						? undefined
-						: calculatePercent(currentCredit, usedCredit),
-			};
-		}
-		core.info(`Final credits: ${finalCredit.toLocaleString()}`);
-
-		const creditDiff =
-			currentCredit === null ? null : finalCredit - currentCredit;
-		let message = `${userName} | Balance: ${finalCredit.toLocaleString()}`;
-
-		if (creditDiff === null) {
-			core.warning("Unable to read starting credits; reward unknown");
-		} else if (creditDiff > 0) {
+		let creditDiff = null;
+		if (daily === null) {
+			core.warning("Unable to read credit history; reward unknown");
+		} else if (daily.claimed) {
+			creditDiff = daily.credit;
 			core.info(
 				`Check-in reward received: +${creditDiff.toLocaleString()} credits`,
 			);
-			message += ` (+${creditDiff.toLocaleString()})`;
-		} else if (creditDiff === 0) {
-			core.info("Already checked in today or no check-in reward");
 		} else {
-			core.warning(`Credits decreased: ${creditDiff.toLocaleString()}`);
+			creditDiff = 0;
+			core.info(
+				`No reward: already claimed at ${daily.createdAt ?? "unknown time"}`,
+			);
 		}
 
+		if (finalCredit === null) {
+			return { userName, finalCredit, creditDiff, lastClaimAt: null };
+		}
+		core.info(`Final credits: ${finalCredit.toLocaleString()}`);
+
 		const availablePercent = calculatePercent(finalCredit, usedCredit);
+		let message = `${userName} | Balance: ${finalCredit.toLocaleString()}`;
+		if (creditDiff > 0) message += ` (+${creditDiff.toLocaleString()})`;
 		message += ` (${availablePercent}%)`;
 		core.info(message);
 
-		return { userName, finalCredit, creditDiff, availablePercent };
+		return {
+			userName,
+			finalCredit,
+			creditDiff,
+			lastClaimAt: daily?.createdAt ?? null,
+			availablePercent,
+		};
+	}
+
+	// Newest-first credit history (daily rewards, purchases); null on failure.
+	async getTopups(teamId, headers) {
+		const topupUrl = `https://api.1min.ai/teams/${teamId}/topups?page=1&pageSize=10&orderBy=-createdAt`;
+
+		try {
+			const response = await this.fetchWithRetry(topupUrl, { headers });
+			if (response.status !== 200) {
+				core.warning(`Topup API failed - Status: ${response.status}`);
+				return null;
+			}
+			const data = await response.json();
+			return Array.isArray(data.topupList) ? data.topupList : null;
+		} catch (error) {
+			const reason = error.name === "AbortError" ? "timeout" : error.message;
+			core.warning(`Topup API error: ${reason}`);
+			return null;
+		}
 	}
 
 	// Returns null when the balance could not be read, so callers never mistake a failure for 0.
@@ -353,6 +402,7 @@ class OneMinAutoCheckin {
 				userName: loginResult?.userName,
 				finalCredit: loginResult?.finalCredit,
 				creditDiff: loginResult?.creditDiff,
+				lastClaimAt: loginResult?.lastClaimAt,
 				availablePercent: loginResult?.availablePercent,
 			});
 			return true;

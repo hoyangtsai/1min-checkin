@@ -133,11 +133,18 @@ describe("notifier", () => {
 });
 
 describe("check-in", () => {
-	const opts = { settleMs: 0, retryDelayMs: 0 };
+	const opts = { pollIntervalMs: 0, retryDelayMs: 0 };
 
-	it("reports unknown reward instead of a fake one when credit reads fail", async () => {
+	const topup = (createdAt, credit = 15000) => ({
+		type: "DAILY_FREE_CREDIT",
+		credit,
+		createdAt: new Date(createdAt).toISOString(),
+	});
+
+	it("reports unknown reward when the credit history can't be read", async () => {
 		mockFetch({
 			"/notifications/unread": () => jsonResponse(200, { count: 0 }),
+			"/topups": () => jsonResponse(500, {}),
 			"/credits": () => jsonResponse(500, {}),
 		});
 		const checkin = new OneMinAutoCheckin(opts);
@@ -146,15 +153,41 @@ describe("check-in", () => {
 		assert.equal(result.finalCredit, null);
 	});
 
-	it("computes the reward when both credit reads succeed", async () => {
-		mockFetch({
-			"/notifications/unread": () => jsonResponse(200, { count: 1 }),
-			"/credits": () => jsonResponse(200, { credit: 1100 }),
-		});
+	it("keeps polling until this run's daily topup appears", async () => {
 		const checkin = new OneMinAutoCheckin(opts);
+		const old = topup(checkin.startedAt - 86400000);
+		let reads = 0;
+		mockFetch({
+			"/notifications/unread": () => jsonResponse(200, { count: 0 }),
+			"/topups": () =>
+				jsonResponse(200, {
+					topupList:
+						++reads < 3 ? [old] : [topup(checkin.startedAt + 3000), old],
+				}),
+			"/credits": () => jsonResponse(200, { credit: 16000 }),
+		});
 		const result = await checkin.fetchLatestCredit("t1", "tok", "u", 0, 1000);
-		assert.equal(result.creditDiff, 100);
-		assert.equal(result.availablePercent, "100.0");
+		assert.equal(result.creditDiff, 15000);
+		assert.equal(result.finalCredit, 16000);
+		assert.equal(reads, 3);
+	});
+
+	it("reports the earlier claim when today's reward was already taken", async () => {
+		const checkin = new OneMinAutoCheckin({ ...opts, pollAttempts: 4 });
+		const earlier = topup(checkin.startedAt - 3600000);
+		let reads = 0;
+		mockFetch({
+			"/notifications/unread": () => jsonResponse(200, { count: 0 }),
+			"/topups": () => {
+				reads++;
+				return jsonResponse(200, { topupList: [earlier] });
+			},
+			"/credits": () => jsonResponse(200, { credit: 1000 }),
+		});
+		const result = await checkin.fetchLatestCredit("t1", "tok", "u", 0, 1000);
+		assert.equal(result.creditDiff, 0);
+		assert.equal(result.lastClaimAt, earlier.createdAt);
+		assert.equal(reads, 4);
 	});
 
 	it("retries 5xx responses and then succeeds", async () => {

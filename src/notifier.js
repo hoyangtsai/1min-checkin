@@ -60,7 +60,11 @@ function formatNotificationMessage(outcome) {
 	if (typeof outcome.creditDiff === "number" && outcome.creditDiff > 0) {
 		lines.push(`Reward: +${outcome.creditDiff.toLocaleString()}`);
 	} else if (outcome.creditDiff === 0) {
-		lines.push("Reward: none (already checked in today)");
+		lines.push(
+			outcome.lastClaimAt
+				? `Reward: none (already claimed at ${escapeHtml(outcome.lastClaimAt)})`
+				: "Reward: none (already claimed today)",
+		);
 	} else if (outcome.creditDiff === null) {
 		lines.push("Reward: unknown (could not read credits)");
 	}
