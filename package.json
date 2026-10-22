@@ -1,6 +1,6 @@
 {
   "name": "1min-ai-auto-checkin",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "1min.ai Auto Checkin GitHub Action",
   "main": "dist/index.js",
   "scripts": {
