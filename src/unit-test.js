@@ -2,6 +2,7 @@
 // Single test: node --test --test-name-pattern="<name>" src/unit-test.js
 const { describe, it, beforeEach, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
+const core = require("@actions/core");
 const OTPAuth = require("otpauth");
 const {
 	validateOptionalSecret,
@@ -11,6 +12,14 @@ const {
 } = require("./helpers.js");
 const { escapeHtml, formatNotificationMessage } = require("./notifier.js");
 const OneMinAutoCheckin = require("./index.js");
+
+// Under GitHub Actions, the failures these tests provoke on purpose would print
+// ::error:: / ::warning:: commands and show up as real annotations on the run.
+// setFailed would also set process.exitCode, and setOutput would write to the
+// step's GITHUB_OUTPUT file.
+for (const fn of ["error", "warning", "setFailed", "setOutput"]) {
+	core[fn] = () => {};
+}
 
 const ENV_KEYS = [
 	"EMAIL",
@@ -51,8 +60,6 @@ afterEach(() => {
 		else process.env[k] = savedEnv[k];
 	}
 	globalThis.fetch = savedFetch;
-	// core.setFailed sets this; reset so expected failures don't fail the run.
-	process.exitCode = 0;
 });
 
 describe("helpers", () => {

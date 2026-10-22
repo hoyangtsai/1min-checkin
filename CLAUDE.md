@@ -38,7 +38,7 @@ All HTTP goes through `fetchWithTimeout()` (10s abort), and everything except TO
 
 **Notifications.** `src/notifier.js` is independent of the check-in logic. `notify(outcome)` silently skips when Telegram secrets are absent, and never throws (failures become `core.warning`). Messages use Telegram `parse_mode: "HTML"`; any dynamic text (user names, API error messages) must go through `escapeHtml`, or Telegram rejects the whole message.
 
-**Helpers and tests.** Pure functions live in `src/helpers.js`, including `validateOptionalSecret`, which treats blank strings and the literal `"null"` as unset secrets. `src/unit-test.js` imports the real modules and stubs `globalThis.fetch` with a URL-routing mock to test the HTTP flow offline. Tests reset `process.exitCode` because `core.setFailed` sets it.
+**Helpers and tests.** Pure functions live in `src/helpers.js`, including `validateOptionalSecret`, which treats blank strings and the literal `"null"` as unset secrets. `src/unit-test.js` imports the real modules and stubs `globalThis.fetch` with a URL-routing mock to test the HTTP flow offline. The test file replaces `core.error`, `core.warning`, `core.setFailed`, and `core.setOutput` with no-ops, so failures it provokes on purpose don't become annotations, exit codes, or step outputs in CI.
 
 ## Build and release
 
