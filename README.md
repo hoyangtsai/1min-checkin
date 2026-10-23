@@ -1,5 +1,7 @@
 # 1min.ai Auto Checkin GitHub Action
 
+> **⚠️ No longer maintained.** 1min.ai now requires a Tencent Captcha on login (`TENCENT_CAPTCHA_REQUIRED`), which a plain API call cannot pass, so this Action can no longer sign in. The repository is archived.
+
 [![1min.ai Daily Auto Checkin](https://github.com/7a6163/1min-checkin/actions/workflows/daily-checkin.yml/badge.svg)](https://github.com/7a6163/1min-checkin/actions/workflows/daily-checkin.yml)
 
 This is a GitHub Action for automatic daily check-in to 1min.ai, supporting email/password login and TOTP two-factor authentication.
